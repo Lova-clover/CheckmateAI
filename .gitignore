@@ -1,0 +1,22 @@
+# node modules (프론트 + 백엔드)
+client/node_modules/
+server/node_modules/
+
+# 빌드 파일
+client/build/
+
+# 환경 변수
+*.env
+*.env.local
+
+# 로그 파일
+*.log
+
+# OS, 에디터 관련
+.DS_Store
+.vscode/
+.idea/
+
+# Python __pycache__ (ai_engine)
+__pycache__/
+*.pyc
