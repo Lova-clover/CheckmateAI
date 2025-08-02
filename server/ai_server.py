@@ -15,36 +15,80 @@ def get_puzzle():
     def generate_mate_puzzle(n):
         board = chess.Board()
         with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-            for _ in range(random.randint(8, 14)):
+            for _ in range(random.randint(10, 16)):
                 if board.is_game_over():
                     return None
-                move = engine.play(board, chess.engine.Limit(depth=2)).move
-                board.push(move)
+                board.push(engine.play(board, chess.engine.Limit(depth=2)).move)
+
+            # 🔍 기물 너무 적으면 제외 (흥미로운 수 없음)
+            non_king_pieces = [p for p in board.piece_map().values() if p.symbol().lower() != 'k']
+            if len(non_king_pieces) < 6:
+                return None
 
             start_fen = board.fen()
-            info = engine.analyse(board, chess.engine.Limit(depth=12), multipv=1)
 
-            if "score" in info and info["score"].is_mate():
-                mate_score = info["score"].mate()
-                if mate_score and abs(mate_score) == n:
-                    tmp_board = chess.Board(start_fen)
-                    solution = []
-                    for _ in range(n):
-                        if tmp_board.is_game_over():
-                            break
-                        move = engine.play(tmp_board, chess.engine.Limit(depth=5)).move
-                        solution.append(tmp_board.san(move))
-                        tmp_board.push(move)
+            # 이전 수 점수 확인
+            prev_info = engine.analyse(board, chess.engine.Limit(depth=8))
+            prev_score = prev_info["score"].white().score(mate_score=10000)
+            if prev_score is None or prev_score < -200:
+                return None  # 역전 상황 아님
 
-                    if len(solution) == n:
-                        piece = chess.Board(start_fen).piece_at(move.from_square)
-                        return {
-                            'fen': start_fen,
-                            'solution': solution,
-                            'hint': f"{piece.symbol().upper()} 시작" if piece else '?',
-                            'description': f"Mate in {n}"
-                        }
-        return None
+            # best move 적용
+            result = engine.play(board, chess.engine.Limit(depth=5))
+            best_move = result.move
+            board.push(best_move)
+
+            # Mate in (n - 1) 확인
+            info = engine.analyse(board, chess.engine.Limit(depth=12))
+            if not info["score"].is_mate() or abs(info["score"].mate()) != n - 1:
+                return None
+
+            # 🔐 best move 외 다른 수는 mate 불가해야 유일 수 조건 만족
+            board = chess.Board(start_fen)
+            legal_moves = list(board.legal_moves)
+            mate_alternatives = 0
+            for move in legal_moves:
+                if move != best_move:
+                    board.push(move)
+                    alt_info = engine.analyse(board, chess.engine.Limit(depth=6))
+                    if alt_info["score"].is_mate():
+                        mate_alternatives += 1
+                    board.pop()
+
+            if mate_alternatives > 0:
+                return None
+
+            # 희생 체크
+            tmp_board = chess.Board(start_fen)
+            piece_before = tmp_board.piece_at(best_move.from_square)
+            tmp_board.push(best_move)
+            captured_piece = tmp_board.piece_at(best_move.to_square)
+            was_sacrifice = (
+                piece_before and piece_before.symbol().lower() == 'q' and captured_piece is None
+            )
+
+            # 수순 생성
+            tmp_board = chess.Board(start_fen)
+            solution = []
+            for _ in range(n):
+                if tmp_board.is_game_over():
+                    break
+                move = engine.play(tmp_board, chess.engine.Limit(depth=6)).move
+                solution.append(tmp_board.san(move))
+                tmp_board.push(move)
+
+            if len(solution) != n:
+                return None
+
+            hint = f"{piece_before.symbol().upper()} 시작" if piece_before else '?'
+            description = f"Mate in {n}" + (" (Q-sac!)" if was_sacrifice and random.random() < 0.7 else "")
+
+            return {
+                'fen': start_fen,
+                'solution': solution,
+                'hint': hint,
+                'description': description
+            }
 
     def generate_normal_puzzle():
         board = chess.Board()
@@ -85,9 +129,10 @@ def get_puzzle():
                 'description': "최선의 수를 찾아보세요"
             }
 
+    # ⬇️ 아래는 get_puzzle() 함수의 마지막에 위치해야 함
     max_attempts = 10
     for _ in range(max_attempts):
-        puzzle_type = random.choice(['mate', 'normal'])
+        puzzle_type = 'mate' if random.random() < 0.8 else 'normal'
         if puzzle_type == 'mate':
             n = random.choice([2, 3])
             puzzle = generate_mate_puzzle(n)
@@ -97,7 +142,14 @@ def get_puzzle():
         if puzzle:
             return jsonify(puzzle)
 
-    return jsonify({'error': '퍼즐 생성 실패'}), 500
+    # fallback
+    fallback = {
+        'fen': "rnb1kbnr/pppp1ppp/8/4p3/8/2P5/PPP1PPPP/RNBQKBNR w KQkq - 0 3",
+        'solution': ["d4", "exd5", "Qxd4", "Nc6", "Qxg7#"],
+        'hint': "Q 시작",
+        'description': "Mate in 3 (예시 퍼즐)"
+    }
+    return jsonify(fallback), 200
 
 
 @app.route('/ai/move', methods=['POST'])
