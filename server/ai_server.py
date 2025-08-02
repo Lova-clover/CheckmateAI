@@ -5,10 +5,10 @@ from flask_cors import CORS
 import random
 
 app = Flask(__name__)
+CORS(app)
 
 STOCKFISH_PATH = "C:/CheckmateAI/server/stockfish/stockfish-windows-x86-64-avx2.exe"
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-CORS(app)
 
 @app.after_request
 def after_request(response):
@@ -17,8 +17,11 @@ def after_request(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
-@app.route('/ai/puzzle', methods=['GET'])
+@app.route('/ai/puzzle', methods=['GET', 'OPTIONS'])  # ✅ OPTIONS 추가
 def get_puzzle():
+    if request.method == 'OPTIONS':  # ✅ Preflight 요청 처리
+        return '', 200
+
     def generate_mate_puzzle(n):
         board = chess.Board()
         with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
@@ -27,30 +30,25 @@ def get_puzzle():
                     return None
                 board.push(engine.play(board, chess.engine.Limit(depth=2)).move)
 
-            # 🔍 기물 너무 적으면 제외 (흥미로운 수 없음)
             non_king_pieces = [p for p in board.piece_map().values() if p.symbol().lower() != 'k']
             if len(non_king_pieces) < 6:
                 return None
 
             start_fen = board.fen()
 
-            # 이전 수 점수 확인
             prev_info = engine.analyse(board, chess.engine.Limit(depth=8))
             prev_score = prev_info["score"].white().score(mate_score=10000)
             if prev_score is None or prev_score < -200:
-                return None  # 역전 상황 아님
+                return None
 
-            # best move 적용
             result = engine.play(board, chess.engine.Limit(depth=5))
             best_move = result.move
             board.push(best_move)
 
-            # Mate in (n - 1) 확인
             info = engine.analyse(board, chess.engine.Limit(depth=12))
             if not info["score"].is_mate() or abs(info["score"].mate()) != n - 1:
                 return None
 
-            # 🔐 best move 외 다른 수는 mate 불가해야 유일 수 조건 만족
             board = chess.Board(start_fen)
             legal_moves = list(board.legal_moves)
             mate_alternatives = 0
@@ -65,7 +63,6 @@ def get_puzzle():
             if mate_alternatives > 0:
                 return None
 
-            # 희생 체크
             tmp_board = chess.Board(start_fen)
             piece_before = tmp_board.piece_at(best_move.from_square)
             tmp_board.push(best_move)
@@ -74,7 +71,6 @@ def get_puzzle():
                 piece_before and piece_before.symbol().lower() == 'q' and captured_piece is None
             )
 
-            # 수순 생성
             tmp_board = chess.Board(start_fen)
             solution = []
             for _ in range(n):
@@ -136,7 +132,6 @@ def get_puzzle():
                 'description': "최선의 수를 찾아보세요"
             }
 
-    # ⬇️ 아래는 get_puzzle() 함수의 마지막에 위치해야 함
     max_attempts = 10
     for _ in range(max_attempts):
         puzzle_type = 'mate' if random.random() < 0.8 else 'normal'
@@ -149,7 +144,6 @@ def get_puzzle():
         if puzzle:
             return jsonify(puzzle)
 
-    # fallback
     fallback = {
         'fen': "rnb1kbnr/pppp1ppp/8/4p3/8/2P5/PPP1PPPP/RNBQKBNR w KQkq - 0 3",
         'solution': ["d4", "exd5", "Qxd4", "Nc6", "Qxg7#"],
@@ -158,9 +152,11 @@ def get_puzzle():
     }
     return jsonify(fallback), 200
 
-
-@app.route('/ai/move', methods=['POST'])
+@app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
 def ai_move():
+    if request.method == 'OPTIONS':  # ✅ Preflight 처리
+        return '', 200
+
     data = request.get_json()
     fen = data.get('fen')
     level = data.get('level', 'medium')
@@ -172,15 +168,12 @@ def ai_move():
 
     try:
         if level == 'easy':
-            # 완전 초보 수준: 90% 랜덤수, 10% depth=1
             if random.random() < 0.9:
                 move = random.choice(list(board.legal_moves))
             else:
                 result = engine.play(board, chess.engine.Limit(depth=1))
                 move = result.move
-
         elif level == 'medium':
-            # 초보 ~ 중급자 수준: 60% depth=2, 40% top 3 수 중 무작위
             if random.random() < 0.6:
                 result = engine.play(board, chess.engine.Limit(depth=2))
                 move = result.move
@@ -192,9 +185,7 @@ def ai_move():
                 else:
                     result = engine.play(board, chess.engine.Limit(depth=2))
                     move = result.move
-
-        else:  # hard
-            # depth=4 또는 0.5초 제한
+        else:
             result = engine.play(board, chess.engine.Limit(depth=4))
             move = result.move
 
