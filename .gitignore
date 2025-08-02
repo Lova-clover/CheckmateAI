@@ -1,4 +1,4 @@
-# node modules (프론트 + 백엔드)
+# node modules 
 client/node_modules/
 server/node_modules/
 
@@ -20,3 +20,5 @@ client/build/
 # Python __pycache__ (ai_engine)
 __pycache__/
 *.pyc
+
+node_modules

@@ -13,6 +13,7 @@ function App() {
   const [winnerMessage, setWinnerMessage] = useState<string>('');
   const [useAI, setUseAI] = useState(true); // true면 AI 대국, false면 사람 vs 사람
   const [aiLevel, setAiLevel] = useState<'easy' | 'medium' | 'hard'>('easy'); // 난이도
+  
   useEffect(() => {
     const handleResize = () => {
       setBoardWidth(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
