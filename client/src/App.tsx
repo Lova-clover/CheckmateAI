@@ -22,7 +22,10 @@ function App() {
   const [showHint, setShowHint] = useState(false);
   const [showSolution, setShowSolution] = useState(false);
   const [userMoves, setUserMoves] = useState<string[]>([]);
-
+  const BACKEND_URL =
+    process.env.NODE_ENV === 'production'
+      ? 'https://your-flask-api.onrender.com' // 🟢 배포된 Flask 서버 주소
+      : 'http://localhost:5000';              // 🧪 로컬 개발용
   useEffect(() => {
     const handleResize = () => {
       setBoardWidth(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
@@ -108,7 +111,7 @@ function App() {
   
   const playAIMove = async () => {
     try {
-      const res = await fetch('http://localhost:5000/ai/move', {
+      const res = await fetch(`${BACKEND_URL}/ai/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fen: game.fen(), level: aiLevel }),
@@ -212,7 +215,7 @@ function App() {
   };
 
   const startPuzzle = async () => {
-    const res = await fetch('http://localhost:5000/ai/puzzle');
+    const res = await fetch(`${BACKEND_URL}/ai/puzzle`);
     const data = await res.json();
     const newPuzzle = new Chess(data.fen);
     setPuzzleFen(data.fen);
