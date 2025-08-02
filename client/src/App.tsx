@@ -156,6 +156,18 @@ function App() {
             setUseAI(false);
           } else {
             setPuzzleMessage('👍 계속 진행하세요');
+            setTimeout(() => {
+              const nextSan = puzzleSolution[newUserMoves.length];
+              const legalMoves = game.moves({ verbose: true });
+              const autoMove = legalMoves.find(m => m.san.replace(/[+#]*/g, '') === nextSan.replace(/[+#]*/g, ''));
+
+              if (autoMove) {
+                game.move(autoMove);
+                setPosition(game.fen());
+                setUserMoves([...newUserMoves, autoMove.san.replace(/[+#]*/g, '')]);
+                checkGameOver(game);
+              }
+            }, 500);
           }
         } else {
           game.undo();
