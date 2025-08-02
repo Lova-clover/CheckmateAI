@@ -3,62 +3,101 @@ import chess
 import chess.engine
 from flask_cors import CORS
 import random
-import json
-import os
 
 app = Flask(__name__)
 CORS(app)
 
-PUZZLE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'puzzles.json')
-
-def load_puzzles():
-    with open(PUZZLE_PATH, encoding='utf-8') as f:
-        return json.load(f)
-
-def get_puzzle_by_id(puzzle_id):
-    puzzles = load_puzzles()
-    for puzzle in puzzles:
-        if puzzle["id"] == puzzle_id:
-            return puzzle
-    return None
-
-@app.route('/puzzle/<int:puzzle_id>', methods=['GET'])
-def get_puzzle(puzzle_id):
-    puzzle = get_puzzle_by_id(puzzle_id)
-    if puzzle:
-        return jsonify({
-            "id": puzzle["id"],
-            "fen": puzzle["fen"],
-            "description": puzzle["description"],
-            "hint": puzzle.get("hint", "")
-        })
-    return jsonify({"error": "Puzzle not found"}), 404
-
-@app.route('/puzzle/check', methods=['POST'])
-def check_puzzle_solution():
-    data = request.get_json()
-    puzzle_id = data.get("id")
-    user_moves = data.get("moves", [])  # 예: ["Ng5", "Qh5"]
-
-    puzzle = get_puzzle_by_id(puzzle_id)
-    if not puzzle:
-        return jsonify({"result": "error", "message": "Puzzle not found"}), 404
-
-    correct_moves = puzzle["solution"]
-
-    if user_moves == correct_moves[:len(user_moves)]:
-        if len(user_moves) == len(correct_moves):
-            return jsonify({"result": "correct"})
-        else:
-            return jsonify({
-                "result": "partial",
-                "next_hint": correct_moves[len(user_moves)]
-            })
-    else:
-        return jsonify({"result": "wrong"})
-
 STOCKFISH_PATH = "C:/CheckmateAI/server/stockfish/stockfish-windows-x86-64-avx2.exe"
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+
+@app.route('/ai/puzzle', methods=['GET'])
+def get_puzzle():
+    def generate_mate_puzzle(n):
+        board = chess.Board()
+        with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+            for _ in range(random.randint(8, 14)):
+                if board.is_game_over():
+                    return None
+                move = engine.play(board, chess.engine.Limit(depth=2)).move
+                board.push(move)
+
+            start_fen = board.fen()
+            info = engine.analyse(board, chess.engine.Limit(depth=12), multipv=1)
+
+            if "score" in info and info["score"].is_mate():
+                mate_score = info["score"].mate()
+                if mate_score and abs(mate_score) == n:
+                    tmp_board = chess.Board(start_fen)
+                    solution = []
+                    for _ in range(n):
+                        if tmp_board.is_game_over():
+                            break
+                        move = engine.play(tmp_board, chess.engine.Limit(depth=5)).move
+                        solution.append(tmp_board.san(move))
+                        tmp_board.push(move)
+
+                    if len(solution) == n:
+                        piece = chess.Board(start_fen).piece_at(move.from_square)
+                        return {
+                            'fen': start_fen,
+                            'solution': solution,
+                            'hint': f"{piece.symbol().upper()} 시작" if piece else '?',
+                            'description': f"Mate in {n}"
+                        }
+        return None
+
+    def generate_normal_puzzle():
+        board = chess.Board()
+        with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+            for _ in range(random.randint(6, 12)):
+                if board.is_game_over():
+                    return None
+                board.push(engine.play(board, chess.engine.Limit(depth=2)).move)
+
+            start_fen = board.fen()
+            solution = []
+            last_move = None
+
+            for _ in range(3):
+                if board.is_game_over():
+                    break
+                result = engine.play(board, chess.engine.Limit(depth=6))
+                move = result.move
+                solution.append(board.san(move))
+                board.push(move)
+                last_move = move
+
+            if len(solution) < 2 or not last_move:
+                return None
+
+            board_for_hint = chess.Board(start_fen)
+            try:
+                first_move = board_for_hint.parse_san(solution[0])
+                piece = board_for_hint.piece_at(first_move.from_square)
+                hint = f"{piece.symbol().upper()} 시작" if piece else '?'
+            except:
+                hint = '?'
+
+            return {
+                'fen': start_fen,
+                'solution': solution,
+                'hint': hint,
+                'description': "최선의 수를 찾아보세요"
+            }
+
+    max_attempts = 10
+    for _ in range(max_attempts):
+        puzzle_type = random.choice(['mate', 'normal'])
+        if puzzle_type == 'mate':
+            n = random.choice([2, 3])
+            puzzle = generate_mate_puzzle(n)
+        else:
+            puzzle = generate_normal_puzzle()
+
+        if puzzle:
+            return jsonify(puzzle)
+
+    return jsonify({'error': '퍼즐 생성 실패'}), 500
 
 
 @app.route('/ai/move', methods=['POST'])

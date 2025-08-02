@@ -13,7 +13,16 @@ function App() {
   const [winnerMessage, setWinnerMessage] = useState<string>('');
   const [useAI, setUseAI] = useState(true); // true면 AI 대국, false면 사람 vs 사람
   const [aiLevel, setAiLevel] = useState<'easy' | 'medium' | 'hard'>('easy'); // 난이도
-  
+  const [puzzleFen, setPuzzleFen] = useState('');
+  const [puzzleGame, setPuzzleGame] = useState(new Chess());
+  const [puzzleSolution, setPuzzleSolution] = useState<string[]>([]);
+  const [puzzleMessage, setPuzzleMessage] = useState('');
+  const [puzzleActive, setPuzzleActive] = useState(false);
+  const [puzzleHint, setPuzzleHint] = useState('');
+  const [showHint, setShowHint] = useState(false);
+  const [showSolution, setShowSolution] = useState(false);
+  const [userMoves, setUserMoves] = useState<string[]>([]);
+
   useEffect(() => {
     const handleResize = () => {
       setBoardWidth(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
@@ -127,6 +136,39 @@ function App() {
   const onDrop = ({ sourceSquare, targetSquare }: { sourceSquare: Square; targetSquare: Square }) => {
     if (game.isGameOver()) return;
 
+    if (puzzleActive) {
+      try {
+        const move = game.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
+        if (!move) return;
+
+        setPosition(game.fen());
+
+        const userMove = move.san.replace(/[+#]*/g, '');
+        const correctMove = puzzleSolution[userMoves.length]?.replace(/[+#]*/g, '');
+
+        if (userMove === correctMove) {
+          const newUserMoves = [...userMoves, userMove];
+          setUserMoves(newUserMoves);
+
+          if (newUserMoves.length === puzzleSolution.length) {
+            setPuzzleMessage('🎉 정답입니다!');
+            setPuzzleActive(false);
+            setUseAI(false);
+          } else {
+            setPuzzleMessage('👍 계속 진행하세요');
+          }
+        } else {
+          game.undo();
+          setPosition(game.fen());
+          setPuzzleMessage('❌ 오답입니다. 다시 시도하세요.');
+        }
+      } catch (e) {
+        console.error('퍼즐 오류:', e);
+      }
+      return;
+    }
+
+
     const piece = game.get(sourceSquare);
     if (!piece || piece.color !== game.turn()) return;
 
@@ -157,6 +199,23 @@ function App() {
     }
   };
 
+  const startPuzzle = async () => {
+    const res = await fetch('http://localhost:5000/ai/puzzle');
+    const data = await res.json();
+    const newPuzzle = new Chess(data.fen);
+    setPuzzleFen(data.fen);
+    setPuzzleGame(newPuzzle);
+    setPosition(data.fen);
+    setPuzzleSolution(data.solution);
+    setPuzzleHint(data.hint || ''); 
+    setPuzzleMessage('');
+    setShowHint(false);
+    setShowSolution(false);
+    setPuzzleActive(true);
+    setGame(newPuzzle);
+    setUserMoves([]);
+  };
+
   const resetGame = () => {
     const newGame = new Chess();
     setGame(newGame);
@@ -166,13 +225,13 @@ function App() {
   };
 
   useEffect(() => {
-    if (useAI && game.turn() === 'b' && !game.isGameOver()) {
+    if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
       const timer = setTimeout(() => {
         playAIMove();
       }, 300);
       return () => clearTimeout(timer); // cleanup
     }
-  }, [game.fen(), useAI]); // ← 이 두 값이 변할 때마다 실행됨
+  }, [game.fen(), useAI, puzzleActive]); 
 
   const turn = game.turn() === 'w' ? '백' : '흑';
   const inCheck = game.inCheck() ? '체크!' : '';
@@ -233,6 +292,61 @@ function App() {
         {gameOver ? `🛑 ${winnerMessage}` : `🎯 ${turn} 차례입니다 ${inCheck}`}
       </div>
 
+      {puzzleActive && (
+        <div style={{ textAlign: 'center', fontSize: 18, color: '#333' }}>
+          {puzzleMessage}
+        </div>
+      )}
+
+      {puzzleActive && (
+        <div style={{ textAlign: 'center', margin: '12px 0' }}>
+          <button
+            onClick={() => setShowHint(true)}
+            style={{ margin: '0 10px', padding: '6px 12px', borderRadius: 6, fontSize: 14 }}
+          >
+            💡 힌트 보기
+          </button>
+          <button
+            onClick={() => setShowSolution(true)}
+            style={{ margin: '0 10px', padding: '6px 12px', borderRadius: 6, fontSize: 14 }}
+          >
+            ✅ 정답 보기
+          </button>
+          <div style={{ marginTop: 10 }}>
+            {showHint && <div style={{ fontStyle: 'italic', color: '#555' }}>힌트: {puzzleHint || '없음'}</div>}
+            {showSolution && (
+              <div style={{ marginTop: 5 }}>
+                정답 수순: {puzzleSolution.join(' → ')}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!puzzleActive && puzzleMessage === '🎉 정답입니다!' && (
+        <button
+          onClick={startPuzzle}
+          style={{
+            display: 'block',
+            margin: '10px auto',
+            padding: '10px 20px',
+            fontWeight: 'bold',
+            fontSize: 16,
+            borderRadius: 8,
+            border: 'none',
+            backgroundColor: '#FF9800',
+            color: 'white',
+            cursor: 'pointer',
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
+            transition: 'all 0.2s ease-in-out',
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#F57C00')}
+          onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#FF9800')}
+        >
+          ▶️ 다음 퍼즐 도전
+        </button>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'center', gap: 24 }}>
         <div style={{ width: boardWidth, boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)', borderRadius: 12, padding: 12, background: 'linear-gradient(145deg, #e4cfa0, #f0d9b5)' }}>
           <Chessboard
@@ -255,6 +369,15 @@ function App() {
             </ul>
         </div>
       </div>
+      
+      <button
+        onClick={startPuzzle}
+        style={{ display: 'block', margin: '20px auto', padding: '12px 24px', fontWeight: 'bold', fontSize: 16, borderRadius: 8, border: 'none', backgroundColor: '#2196F3', color: 'white', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)', transition: 'all 0.2s ease-in-out' }}
+        onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#1976D2')}
+        onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#2196F3')}
+      >
+        🧩 퍼즐 시작하기
+      </button>
 
       <button
         onClick={resetGame}

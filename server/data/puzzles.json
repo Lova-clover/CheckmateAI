@@ -1,9 +1,0 @@
-[
-  {
-    "id": 1,
-    "fen": "r1bqkbnr/pppppppp/2n5/8/2B5/5N2/PPPPPPPP/RNBQK2R w KQkq - 2 3",
-    "solution": ["Ng5", "Qh5", "Qxf7#"],
-    "description": "백이 3수 만에 체크메이트",
-    "hint": "킹 쪽 폰 구조의 약점을 공략해보세요"
-  }
-]
