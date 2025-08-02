@@ -59,22 +59,6 @@ CheckmateAI/
 
 ---
 
-## 🚀 로컬 실행 방법
-
-### 1. 백엔드 실행
-
-```bash
-cd server
-python -m venv venv
-source venv/bin/activate  # Windows는 venv\Scripts\activate
-pip install -r requirements.txt
-python ai_server.py
-
-### 1. 프론트엔드 실행
-cd client
-npm install
-npm run dev
-
 ### 🔍 향후 개선 예정
 - 사용자 로그인 및 기록 저장 기능
 
