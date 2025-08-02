@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 STOCKFISH_PATH = "C:/CheckmateAI/server/stockfish/stockfish-windows-x86-64-avx2.exe"
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}})
+CORS(app)
 
 @app.after_request
 def after_request(response):
@@ -16,8 +16,6 @@ def after_request(response):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
-
-
 
 @app.route('/ai/puzzle', methods=['GET'])
 def get_puzzle():
