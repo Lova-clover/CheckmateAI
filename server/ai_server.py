@@ -136,5 +136,3 @@ def ai_move():
         print("🔥 AI 서버 오류:", e)
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
-    app.run(port=5000)
