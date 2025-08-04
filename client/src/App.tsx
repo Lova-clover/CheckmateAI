@@ -3,6 +3,7 @@ import Chessboard from 'chessboardjsx';
 import { Chess, Square } from 'chess.js';
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from "firebase/auth";
+import './App.css';
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
@@ -365,42 +366,45 @@ function App() {
 
   
   const renderAuthForm = () => (
-    <div style={{ maxWidth: 320, margin: '80px auto', textAlign: 'center', padding: 20, border: '1px solid #ddd', borderRadius: 10 }}>
-      <h2>{mode === 'login' ? '로그인' : '회원가입'}</h2>
-      <input
-        type="email"
-        placeholder="이메일"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10 }}
-      />
-      <input
-        type="password"
-        placeholder="비밀번호"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10 }}
-      />
+    <div className="auth-box">
+      <h2 className="auth-title text-center">{mode === 'login' ? '🔐 로그인' : '✍️ 회원가입'}</h2>
+      <div className="mb-3">
+        <input
+          type="email"
+          className="form-control"
+          placeholder="이메일 주소"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+      <div className="mb-4">
+        <input
+          type="password"
+          className="form-control"
+          placeholder="비밀번호"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
       {mode === 'login' ? (
         <>
-          <button onClick={handleLogin} style={{ padding: '10px 20px', marginBottom: 10 }}>로그인</button>
-          <p>
-            계정이 없으신가요?{" "}
-            <button onClick={() => setMode('signup')} style={{ color: '#2196F3', background: 'none', border: 'none', cursor: 'pointer' }}>회원가입</button>
+          <button className="btn btn-primary w-100 mb-3" onClick={handleLogin}>로그인</button>
+          <p className="text-center">
+            아직 회원이 아니신가요?{' '}
+            <button className="btn btn-link p-0" onClick={() => setMode('signup')}>회원가입</button>
           </p>
         </>
       ) : (
         <>
-          <button onClick={handleSignup} style={{ padding: '10px 20px', marginBottom: 10 }}>회원가입</button>
-          <p>
-            이미 계정이 있으신가요?{" "}
-            <button onClick={() => setMode('login')} style={{ color: '#2196F3', background: 'none', border: 'none', cursor: 'pointer' }}>로그인</button>
+          <button className="btn btn-success w-100 mb-3" onClick={handleSignup}>회원가입</button>
+          <p className="text-center">
+            이미 계정이 있으신가요?{' '}
+            <button className="btn btn-link p-0" onClick={() => setMode('login')}>로그인</button>
           </p>
         </>
       )}
     </div>
   );
-
 
   return (
       <>
