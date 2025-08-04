@@ -366,43 +366,23 @@ function App() {
 
   
   const renderAuthForm = () => (
-    <div className="auth-box">
-      <h2 className="auth-title text-center">{mode === 'login' ? '🔐 로그인' : '✍️ 회원가입'}</h2>
-      <div className="mb-3">
-        <input
-          type="email"
-          className="form-control"
-          placeholder="이메일 주소"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </div>
-      <div className="mb-4">
-        <input
-          type="password"
-          className="form-control"
-          placeholder="비밀번호"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
-      {mode === 'login' ? (
-        <>
-          <button className="btn btn-primary w-100 mb-3" onClick={handleLogin}>로그인</button>
+    <div className="container d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+      <div className="card shadow auth-box">
+        <div className="card-body">
+          <h3 className="text-center mb-4">{mode === 'login' ? '🔐 로그인' : '✍️ 회원가입'}</h3>
+          <input type="email" className="form-control mb-3" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" className="form-control mb-4" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button className={`btn ${mode === 'login' ? 'btn-primary' : 'btn-success'} w-100 mb-3`} onClick={mode === 'login' ? handleLogin : handleSignup}>
+            {mode === 'login' ? '로그인' : '회원가입'}
+          </button>
           <p className="text-center">
-            아직 회원이 아니신가요?{' '}
-            <button className="btn btn-link p-0" onClick={() => setMode('signup')}>회원가입</button>
+            {mode === 'login' ? '계정이 없으신가요?' : '이미 계정이 있으신가요?'}{' '}
+            <button className="btn btn-link p-0" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+              {mode === 'login' ? '회원가입' : '로그인'}
+            </button>
           </p>
-        </>
-      ) : (
-        <>
-          <button className="btn btn-success w-100 mb-3" onClick={handleSignup}>회원가입</button>
-          <p className="text-center">
-            이미 계정이 있으신가요?{' '}
-            <button className="btn btn-link p-0" onClick={() => setMode('login')}>로그인</button>
-          </p>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   );
 
