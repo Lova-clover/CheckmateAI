@@ -398,18 +398,18 @@ function App() {
       renderAuthForm()
     ) : (
       <>
-      {/* 상단 네비게이션 바 */}
-      <nav className="navbar navbar-light bg-light justify-content-between px-4 py-2 shadow-sm">
-        <span className="navbar-text fw-bold text-primary">
-          CheckmateAI ♟️
-        </span>
-        <div className="d-flex align-items-center gap-3">
-          <span className="text-muted small">{userEmail}</span>
-          <button onClick={handleLogout} className="btn btn-outline-secondary btn-sm">
-            로그아웃
-          </button>
+      <>
+        {/* 🔝 맨 위 제목 */}
+        <div className="text-center py-3 bg-light shadow-sm">
+          <h4 className="fw-bold text-primary m-0">CheckmateAI ♟️</h4>
         </div>
-      </nav>
+
+        {/* 👤 로그인 후 이메일 + 로그아웃 중앙 정렬 */}
+        <div className="d-flex flex-column align-items-center justify-content-center" style={{ marginTop: 60 }}>
+          <p className="text-muted">✅ 로그인됨: {userEmail}</p>
+          <button onClick={handleLogout} className="btn btn-outline-secondary">로그아웃</button>
+        </div>
+      </>
       {renderPromotionModal()}
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
