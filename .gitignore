@@ -24,4 +24,4 @@ __pycache__/
 node_modules
 
 "server/puzzles.db" 
-"server/puzzles.db" 
+".env" 
