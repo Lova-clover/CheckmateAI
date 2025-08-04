@@ -24,9 +24,8 @@ function App() {
   const [userMoves, setUserMoves] = useState<string[]>([]);
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
-    ? 'https://checkmateai-server.onrender.com' // 🟢 Flask 백엔드 배포 주소
-    : 'http://localhost:5000';                   // 🧪 로컬 개발용
-
+      ? 'https://checkmateai-app.vercel.app/' // 🟢 배포된 Flask 서버 주소
+      : 'http://localhost:5000';              // 🧪 로컬 개발용
   useEffect(() => {
     const handleResize = () => {
       setBoardWidth(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
