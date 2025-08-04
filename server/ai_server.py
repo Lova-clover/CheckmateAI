@@ -3,11 +3,12 @@ import chess
 import chess.engine
 from flask_cors import CORS
 import random
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-STOCKFISH_PATH = "C:/CheckmateAI/server/stockfish/stockfish-windows-x86-64-avx2.exe"
+STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
 @app.after_request
