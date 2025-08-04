@@ -1,6 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import Chessboard from 'chessboardjsx';
 import { Chess, Square } from 'chess.js';
+import { initializeApp } from "firebase/app";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+
+const firebaseConfig = {
+  apiKey: "🔥당신의 키",
+  authDomain: "🔥당신의 도메인",
+  projectId: "CheckmateAI",
+  appId: "🔥당신의 AppID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 
 function App() {
   const [game, setGame] = useState(new Chess());
@@ -22,10 +34,35 @@ function App() {
   const [showHint, setShowHint] = useState(false);
   const [showSolution, setShowSolution] = useState(false);
   const [userMoves, setUserMoves] = useState<string[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState(''); 
+  const [puzzleId, setPuzzleId] = useState<string>('');
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
       ? 'https://checkmateai-s5qg.onrender.com/' // 🟢 배포된 Flask 서버 주소
-      : 'http://localhost:5000';              // 🧪 로컬 개발용
+      : 'http://localhost:5000';              // 🧪 로컬 개발용   
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (user) => {
+      if (user) setUserId(user.uid);
+      else setUserId(null);
+    });
+  }, []);
+
+   const handleLogin = async () => {
+    try {
+      const userCred = await signInWithEmailAndPassword(auth, email, password);
+      setUserId(userCred.user.uid);
+    } catch (e: any) {
+      alert("로그인 실패: " + e.message);
+    }
+  };
+
+  const handleLogout = () => {
+    signOut(auth);
+  };
+
   useEffect(() => {
     const handleResize = () => {
       setBoardWidth(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
@@ -136,7 +173,7 @@ function App() {
     }
   };
 
-  const onDrop = ({ sourceSquare, targetSquare }: { sourceSquare: Square; targetSquare: Square }) => {
+  const onDrop = async ({ sourceSquare, targetSquare }: { sourceSquare: Square; targetSquare: Square }) => {
     if (game.isGameOver()) return;
 
     if (puzzleActive) {
@@ -157,6 +194,18 @@ function App() {
             setPuzzleMessage('🎉 정답입니다!');
             setPuzzleActive(false);
             setUseAI(false);
+
+            // ✅ 점수 기록 API 호출
+            await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                puzzle_id: puzzleId,
+                solved: true,
+                time: 10  // 추후 실제 풀이 시간 넣어도 OK
+              })
+            });
           } else {
             setPuzzleMessage('👍 계속 진행하세요');
             setTimeout(() => {
@@ -215,20 +264,27 @@ function App() {
   };
 
   const startPuzzle = async () => {
-    const res = await fetch(`${BACKEND_URL}/ai/puzzle`);
+    if (!userId) {
+      alert("로그인 후 이용 가능합니다.");
+      return;
+    }
+
+    const res = await fetch(`${BACKEND_URL}/ai/puzzle?user_id=${userId}`);
     const data = await res.json();
     const newPuzzle = new Chess(data.fen);
+
     setPuzzleFen(data.fen);
     setPuzzleGame(newPuzzle);
     setPosition(data.fen);
     setPuzzleSolution(data.solution);
-    setPuzzleHint(data.hint || ''); 
+    setPuzzleHint(data.hint || '');
     setPuzzleMessage('');
     setShowHint(false);
     setShowSolution(false);
     setPuzzleActive(true);
     setGame(newPuzzle);
     setUserMoves([]);
+    setPuzzleId(data.puzzle_id); 
   };
 
   const resetGame = () => {
@@ -300,6 +356,20 @@ function App() {
 
   return (
     <>
+      {/* 로그인 영역 */}
+      {!userId ? (
+        <div style={{ textAlign: 'center', marginTop: 20 }}>
+          <h3>🔐 로그인 후 이용하세요</h3>
+          <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} />
+          <input type="password" placeholder="비밀번호" value={password} onChange={e => setPassword(e.target.value)} />
+          <button onClick={handleLogin}>로그인</button>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', marginTop: 20 }}>
+          <p>✅ 로그인됨: {userId}</p>
+          <button onClick={handleLogout}>로그아웃</button>
+        </div>
+      )}
       {renderPromotionModal()}
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}

@@ -4,10 +4,12 @@ import chess.engine
 from flask_cors import CORS
 import random
 import os
+import sqlite3
 
 app = Flask(__name__)
 CORS(app)
 
+DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
@@ -18,140 +20,79 @@ def after_request(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
-@app.route('/ai/puzzle', methods=['GET', 'OPTIONS'])  # ✅ OPTIONS 추가
+@app.route("/ai/puzzle", methods=["GET"])
 def get_puzzle():
-    if request.method == 'OPTIONS':  # ✅ Preflight 요청 처리
-        return '', 200
+    user_id = request.args.get("user_id")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
-    def generate_mate_puzzle(n):
-        board = chess.Board()
-        with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-            for _ in range(random.randint(10, 16)):
-                if board.is_game_over():
-                    return None
-                board.push(engine.play(board, chess.engine.Limit(depth=2)).move)
+    # 사용자 점수 가져오기
+    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    score = row[0] if row else 1200
 
-            non_king_pieces = [p for p in board.piece_map().values() if p.symbol().lower() != 'k']
-            if len(non_king_pieces) < 6:
-                return None
+    # 추천 퍼즐 (±100)
+    lower = max(600, score - 100)
+    upper = min(2400, score + 100)
+    cursor.execute("""
+        SELECT fen, moves, rating, themes, puzzle_id
+        FROM puzzles
+        WHERE rating BETWEEN ? AND ?
+        ORDER BY RANDOM()
+        LIMIT 1
+    """, (lower, upper))
 
-            start_fen = board.fen()
+    puzzle = cursor.fetchone()
+    conn.close()
 
-            prev_info = engine.analyse(board, chess.engine.Limit(depth=8))
-            prev_score = prev_info["score"].white().score(mate_score=10000)
-            if prev_score is None or prev_score < -200:
-                return None
+    return jsonify({
+        "fen": puzzle[0],
+        "solution": puzzle[1].split(),
+        "description": f"난이도 {puzzle[2]}",
+        "hint": puzzle[1].split()[0],
+        "puzzle_id": puzzle[4],
+    })
 
-            result = engine.play(board, chess.engine.Limit(depth=5))
-            best_move = result.move
-            board.push(best_move)
+@app.route("/ai/puzzle/submit", methods=["POST"])
+def submit_result():
+    data = request.get_json()
+    user_id = data["user_id"]
+    puzzle_id = data["puzzle_id"]
+    solved = data["solved"]
+    time_taken = data["time"]
 
-            info = engine.analyse(board, chess.engine.Limit(depth=12))
-            if not info["score"].is_mate() or abs(info["score"].mate()) != n - 1:
-                return None
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
-            board = chess.Board(start_fen)
-            legal_moves = list(board.legal_moves)
-            mate_alternatives = 0
-            for move in legal_moves:
-                if move != best_move:
-                    board.push(move)
-                    alt_info = engine.analyse(board, chess.engine.Limit(depth=6))
-                    if alt_info["score"].is_mate():
-                        mate_alternatives += 1
-                    board.pop()
+    # 퍼즐 난이도 가져오기
+    cursor.execute("SELECT rating FROM puzzles WHERE puzzle_id = ?", (puzzle_id,))
+    puzzle_rating = cursor.fetchone()[0]
 
-            if mate_alternatives > 0:
-                return None
+    # 유저 점수 가져오기
+    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    user_score = row[0] if row else 1200
 
-            tmp_board = chess.Board(start_fen)
-            piece_before = tmp_board.piece_at(best_move.from_square)
-            tmp_board.push(best_move)
-            captured_piece = tmp_board.piece_at(best_move.to_square)
-            was_sacrifice = (
-                piece_before and piece_before.symbol().lower() == 'q' and captured_piece is None
-            )
+    # 점수 차이 기반 업데이트
+    diff = puzzle_rating - user_score
+    delta = 20 + diff // 40 if solved else -15 + diff // 80
+    new_score = max(600, user_score + delta)
 
-            tmp_board = chess.Board(start_fen)
-            solution = []
-            for _ in range(n):
-                if tmp_board.is_game_over():
-                    break
-                move = engine.play(tmp_board, chess.engine.Limit(depth=6)).move
-                solution.append(tmp_board.san(move))
-                tmp_board.push(move)
+    # 저장
+    cursor.execute("""
+        INSERT INTO puzzle_results (user_id, puzzle_id, solved, time_taken)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, puzzle_id, solved, time_taken))
 
-            if len(solution) != n:
-                return None
+    cursor.execute("""
+        INSERT OR REPLACE INTO user_profile (user_id, score)
+        VALUES (?, ?)
+    """, (user_id, new_score))
 
-            hint = f"{piece_before.symbol().upper()} 시작" if piece_before else '?'
-            description = f"Mate in {n}" + (" (Q-sac!)" if was_sacrifice and random.random() < 0.7 else "")
+    conn.commit()
+    conn.close()
 
-            return {
-                'fen': start_fen,
-                'solution': solution,
-                'hint': hint,
-                'description': description
-            }
-
-    def generate_normal_puzzle():
-        board = chess.Board()
-        with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-            for _ in range(random.randint(6, 12)):
-                if board.is_game_over():
-                    return None
-                board.push(engine.play(board, chess.engine.Limit(depth=2)).move)
-
-            start_fen = board.fen()
-            solution = []
-            last_move = None
-
-            for _ in range(3):
-                if board.is_game_over():
-                    break
-                result = engine.play(board, chess.engine.Limit(depth=6))
-                move = result.move
-                solution.append(board.san(move))
-                board.push(move)
-                last_move = move
-
-            if len(solution) < 2 or not last_move:
-                return None
-
-            board_for_hint = chess.Board(start_fen)
-            try:
-                first_move = board_for_hint.parse_san(solution[0])
-                piece = board_for_hint.piece_at(first_move.from_square)
-                hint = f"{piece.symbol().upper()} 시작" if piece else '?'
-            except:
-                hint = '?'
-
-            return {
-                'fen': start_fen,
-                'solution': solution,
-                'hint': hint,
-                'description': "최선의 수를 찾아보세요"
-            }
-
-    max_attempts = 10
-    for _ in range(max_attempts):
-        puzzle_type = 'mate' if random.random() < 0.8 else 'normal'
-        if puzzle_type == 'mate':
-            n = random.choice([2, 3])
-            puzzle = generate_mate_puzzle(n)
-        else:
-            puzzle = generate_normal_puzzle()
-
-        if puzzle:
-            return jsonify(puzzle)
-
-    fallback = {
-        'fen': "rnb1kbnr/pppp1ppp/8/4p3/8/2P5/PPP1PPPP/RNBQKBNR w KQkq - 0 3",
-        'solution': ["d4", "exd5", "Qxd4", "Nc6", "Qxg7#"],
-        'hint': "Q 시작",
-        'description': "Mate in 3 (예시 퍼즐)"
-    }
-    return jsonify(fallback), 200
+    return jsonify({"new_score": new_score, "delta": delta})
 
 @app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
 def ai_move():
