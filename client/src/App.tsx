@@ -42,7 +42,7 @@ function App() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
-      ? 'https://checkmateai-s5qg.onrender.com/' // 🟢 배포된 Flask 서버 주소
+      ? 'https://checkmateai-s5qg.onrender.com' // 🟢 배포된 Flask 서버 주소
       : 'http://localhost:5000';              // 🧪 로컬 개발용   
 
   useEffect(() => {
