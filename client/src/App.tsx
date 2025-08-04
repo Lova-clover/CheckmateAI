@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Chessboard from 'chessboardjsx';
 import { Chess, Square } from 'chess.js';
 import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
@@ -18,7 +18,7 @@ function App() {
   const [game, setGame] = useState(new Chess());
   const [position, setPosition] = useState('start');
   const [boardWidth, setBoardWidth] = useState(window.innerWidth > 500 ? 500 : window.innerWidth - 20);
-
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [promotionModalOpen, setPromotionModalOpen] = useState(false);
   const [promotionPending, setPromotionPending] = useState<{ from: Square; to: Square } | null>(null);
   const [movePairs, setMovePairs] = useState<[string, string | null][]>([]);
@@ -50,7 +50,16 @@ function App() {
     });
   }, []);
 
-   const handleLogin = async () => {
+  const handleSignup = async () => {
+    try {
+      const userCred = await createUserWithEmailAndPassword(auth, email, password);
+      setUserId(userCred.user.uid);
+    } catch (e: any) {
+      alert("회원가입 실패: " + e.message);
+    }
+  };
+
+  const handleLogin = async () => {
     try {
       const userCred = await signInWithEmailAndPassword(auth, email, password);
       setUserId(userCred.user.uid);
@@ -354,22 +363,56 @@ function App() {
       </div>
     );
 
-  return (
-    <>
-      {/* 로그인 영역 */}
-      {!userId ? (
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
-          <h3>🔐 로그인 후 이용하세요</h3>
-          <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} />
-          <input type="password" placeholder="비밀번호" value={password} onChange={e => setPassword(e.target.value)} />
-          <button onClick={handleLogin}>로그인</button>
-        </div>
+  
+  const renderAuthForm = () => (
+    <div style={{ maxWidth: 320, margin: '80px auto', textAlign: 'center', padding: 20, border: '1px solid #ddd', borderRadius: 10 }}>
+      <h2>{mode === 'login' ? '로그인' : '회원가입'}</h2>
+      <input
+        type="email"
+        placeholder="이메일"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10 }}
+      />
+      <input
+        type="password"
+        placeholder="비밀번호"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        style={{ display: 'block', width: '100%', padding: 10, marginBottom: 10 }}
+      />
+      {mode === 'login' ? (
+        <>
+          <button onClick={handleLogin} style={{ padding: '10px 20px', marginBottom: 10 }}>로그인</button>
+          <p>
+            계정이 없으신가요?{" "}
+            <button onClick={() => setMode('signup')} style={{ color: '#2196F3', background: 'none', border: 'none', cursor: 'pointer' }}>회원가입</button>
+          </p>
+        </>
       ) : (
+        <>
+          <button onClick={handleSignup} style={{ padding: '10px 20px', marginBottom: 10 }}>회원가입</button>
+          <p>
+            이미 계정이 있으신가요?{" "}
+            <button onClick={() => setMode('login')} style={{ color: '#2196F3', background: 'none', border: 'none', cursor: 'pointer' }}>로그인</button>
+          </p>
+        </>
+      )}
+    </div>
+  );
+
+
+  return (
+      <>
+    {!userId ? (
+      renderAuthForm()
+    ) : (
+      <>
+        {/* 로그인 후 보여줄 UI 전체 */}
         <div style={{ textAlign: 'center', marginTop: 20 }}>
           <p>✅ 로그인됨: {userId}</p>
           <button onClick={handleLogout}>로그아웃</button>
         </div>
-      )}
       {renderPromotionModal()}
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
@@ -472,6 +515,8 @@ function App() {
       >
         🔁 게임 다시 시작
       </button>
+    </>
+        )}
     </>
   );
 }
