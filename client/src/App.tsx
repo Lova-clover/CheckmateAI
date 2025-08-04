@@ -39,6 +39,7 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(''); 
   const [puzzleId, setPuzzleId] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
       ? 'https://checkmateai-s5qg.onrender.com/' // 🟢 배포된 Flask 서버 주소
@@ -46,8 +47,13 @@ function App() {
 
   useEffect(() => {
     onAuthStateChanged(auth, (user) => {
-      if (user) setUserId(user.uid);
-      else setUserId(null);
+      if (user) {
+        setUserId(user.uid);
+        setUserEmail(user.email); // 이메일 저장
+      } else {
+        setUserId(null);
+        setUserEmail(null);
+      }
     });
   }, []);
 
@@ -392,11 +398,18 @@ function App() {
       renderAuthForm()
     ) : (
       <>
-        {/* 로그인 후 보여줄 UI 전체 */}
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
-          <p>✅ 로그인됨: {userId}</p>
-          <button onClick={handleLogout}>로그아웃</button>
+      {/* 상단 네비게이션 바 */}
+      <nav className="navbar navbar-light bg-light justify-content-between px-4 py-2 shadow-sm">
+        <span className="navbar-text fw-bold text-primary">
+          CheckmateAI ♟️
+        </span>
+        <div className="d-flex align-items-center gap-3">
+          <span className="text-muted small">{userEmail}</span>
+          <button onClick={handleLogout} className="btn btn-outline-secondary btn-sm">
+            로그아웃
+          </button>
         </div>
+      </nav>
       {renderPromotionModal()}
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
