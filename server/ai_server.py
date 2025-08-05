@@ -6,8 +6,6 @@ import random
 import os
 import sqlite3
 import math
-import zipfile
-import requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)

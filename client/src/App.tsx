@@ -185,10 +185,18 @@ function App() {
 
       if (!data.move) return;
 
+      const from = data.move.slice(0, 2);
+      const to = data.move.slice(2, 4);
+
+      const isPromotion =
+        game.get(from)?.type === 'p' &&
+        ((game.get(from)?.color === 'w' && to[1] === '8') ||
+        (game.get(from)?.color === 'b' && to[1] === '1'));
+
       const move = game.move({
-        from: data.move.slice(0, 2),
-        to: data.move.slice(2, 4),
-        promotion: 'q', // AI가 폰을 승급할 수도 있음
+        from,
+        to,
+        ...(isPromotion ? { promotion: 'q' } : {})
       });
 
       if (move) {
@@ -206,7 +214,17 @@ function App() {
 
     if (puzzleActive) {
       try {
-        const move = game.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
+        const piece = game.get(sourceSquare);
+        const isPromotion =
+          piece?.type === 'p' &&
+          ((piece.color === 'w' && targetSquare[1] === '8') ||
+          (piece.color === 'b' && targetSquare[1] === '1'));
+
+        const move = game.move({
+          from: sourceSquare,
+          to: targetSquare,
+          ...(isPromotion ? { promotion: 'q' } : {})
+        });
         if (!move) return;
 
         setPosition(game.fen());
