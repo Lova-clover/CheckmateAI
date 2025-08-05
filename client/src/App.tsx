@@ -185,10 +185,16 @@ function App() {
 
       if (!data.move) return;
 
+      const from = data.move.slice(0, 2);
+      const to = data.move.slice(2, 4);
+
+      const piece = game.get(from);
+      const isPromotion = piece?.type === 'p' && ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1'));
+
       const move = game.move({
-        from: data.move.slice(0, 2),
-        to: data.move.slice(2, 4),
-        promotion: 'q', // AI가 폰을 승급할 수도 있음
+        from,
+        to,
+        ...(isPromotion ? { promotion: 'q' } : {}) // 조건부로 promotion 추가
       });
 
       if (move) {
