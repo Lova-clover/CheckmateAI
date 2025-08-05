@@ -222,36 +222,48 @@ def ai_move():
 
 @app.route("/ai/user/stats", methods=["GET"])
 def user_stats():
-    user_id = request.args.get("user_id")
-    db = get_db()
-    cursor = db.cursor()
+    try:
+        user_id = request.args.get("user_id")
+        db = get_db()
+        cursor = db.cursor()
 
-    # 점수
-    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
-    score = cursor.fetchone()[0]
+        # ✅ 유저 점수 가져오기 (없으면 1200)
+        cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        score = row[0] if row else 1200
 
-    # 퍼즐 통계
-    cursor.execute("SELECT COUNT(*), SUM(CASE WHEN solved THEN 1 ELSE 0 END) FROM puzzle_results WHERE user_id = ?", (user_id,))
-    total, success = cursor.fetchone()
-    success_rate = (success or 0) / total * 100 if total > 0 else 0
+        # 전체 시도 수 / 성공 수
+        cursor.execute("SELECT COUNT(*), SUM(solved) FROM puzzle_results WHERE user_id = ?", (user_id,))
+        total, success = cursor.fetchone()
+        total = total or 0
+        success = success or 0
+        rate = round(success / total * 100, 1) if total > 0 else 0.0
 
-    # 최근 5개 결과
-    cursor.execute("""
-        SELECT puzzle_id, solved, time_taken, created_at
-        FROM puzzle_results
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-        LIMIT 5
-    """, (user_id,))
-    recent = cursor.fetchall()
-
-    return jsonify({
-        "score": score,
-        "total": total,
-        "success": success or 0,
-        "success_rate": round(success_rate, 1),
-        "recent": [
-            {"puzzle_id": r[0], "solved": bool(r[1]), "time": r[2], "date": r[3]}
-            for r in recent
+        # 최근 기록 (created_at 컬럼이 있어야 함)
+        cursor.execute("""
+            SELECT puzzle_id, solved, time_taken, created_at
+            FROM puzzle_results
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (user_id,))
+        recent = [
+            {
+                "puzzle_id": row[0],
+                "solved": bool(row[1]),
+                "time": row[2],
+                "date": row[3]
+            }
+            for row in cursor.fetchall()
         ]
-    })
+
+        return jsonify({
+            "score": score,
+            "total": total,
+            "success": success,
+            "success_rate": rate,
+            "recent": recent
+        })
+    except Exception as e:
+        print("❌ 마이페이지 API 실패:", e)
+        return jsonify({"error": "server error", "details": str(e)}), 500
