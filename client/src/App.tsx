@@ -266,6 +266,20 @@ function App() {
           game.undo();
           setPosition(game.fen());
           setPuzzleMessage('❌ 오답입니다. 다시 시도하세요.');
+          try {
+            await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                puzzle_id: puzzleId,
+                solved: false,
+                time: 10
+              })
+            });
+          } catch (e) {
+            console.error('오답 제출 실패:', e);
+          }
         }
       } catch (e) {
         console.error('퍼즐 오류:', e);
@@ -478,7 +492,11 @@ function App() {
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
       <div style={{ textAlign: 'center', margin: '20px', fontWeight: 'bold', fontSize: 24, color: gameOver ? 'red' : '#333' }}>
-        {gameOver ? `🛑 ${winnerMessage}` : `🎯 ${turn} 차례입니다 ${inCheck}`}
+        {puzzleActive
+          ? `🤔 퍼즐 진행 중`
+          : gameOver
+            ? `🛑 ${winnerMessage}`
+            : `🎯 ${turn} 차례입니다 ${inCheck}`}
       </div>
 
       {puzzleActive && (

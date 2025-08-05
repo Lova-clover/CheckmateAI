@@ -74,49 +74,42 @@ def close_connection(exception):
     if db is not None:
         db.close()
 
-import logging
-logging.basicConfig(level=logging.INFO)
-
 @app.route("/ai/puzzle", methods=["GET"])
 def get_puzzle():
-    import time
-    t0 = time.time()
-
     user_id = request.args.get("user_id")
-    logging.info(f"[{time.time() - t0:.2f}s] 유저 요청 수신: {user_id}")
-    
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     score = row[0] if row else 1200
-    logging.info(f"[{time.time() - t0:.2f}s] 유저 점수 로딩 완료: {score}")
 
     lower = max(600, score - 100)
     upper = min(2400, score + 100)
 
+    # 해당 난이도 구간 퍼즐 개수 먼저 가져옴
     cursor.execute("SELECT COUNT(*) FROM puzzles WHERE rating BETWEEN ? AND ?", (lower, upper))
     count = cursor.fetchone()[0]
-    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 개수 확인: {count}")
 
     if count == 0:
         return jsonify({"error": "No puzzles found"}), 404
 
+    # 무작위 오프셋 생성 (속도 매우 빠름)
     offset = random.randint(0, max(0, count - 1))
 
+    # 단 하나의 퍼즐만 가져오기 (ORDER BY 제거로 속도 향상)
     cursor.execute("""
         SELECT fen, moves, rating, themes, puzzle_id
         FROM puzzles
         WHERE rating BETWEEN ? AND ?
         LIMIT 1 OFFSET ?
     """, (lower, upper, offset))
-    puzzle = cursor.fetchone()
-    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 1개 로딩 완료")
 
+    puzzle = cursor.fetchone()
+
+    # ✅ FEN 기반 보드 생성 후 SAN → UCI 변환
     board = chess.Board(puzzle[0])
     uci_solution = [board.parse_san(m).uci() for m in puzzle[1].split()]
-    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 변환 및 응답 준비 완료")
 
     return jsonify({
         "fen": puzzle[0],
