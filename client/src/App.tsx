@@ -56,7 +56,7 @@ function App() {
       }
     });
   }, []);
-
+  
   const handleSignup = async () => {
     try {
       const userCred = await createUserWithEmailAndPassword(auth, email, password);
@@ -78,6 +78,13 @@ function App() {
   const handleLogout = () => {
     signOut(auth);
   };
+
+  useEffect(() => {
+    if (puzzleActive && puzzleSolution.length > 0) {
+      const nextHint = puzzleSolution[userMoves.length] || '';
+      setPuzzleHint(nextHint);
+    }
+  }, [userMoves, puzzleActive, puzzleSolution]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -323,7 +330,6 @@ function App() {
       setPuzzleGame(newPuzzle);
       setPosition(data.fen);
       setPuzzleSolution(data.solution);
-      setPuzzleHint(data.hint || '');
       setPuzzleMessage('');
       setShowHint(false);
       setShowSolution(false);
@@ -340,9 +346,12 @@ function App() {
         );
 
         if (autoMove) {
-          newPuzzle.move(autoMove);
-          setPosition(newPuzzle.fen());
-          setUserMoves([firstMoveUCI]);
+          setTimeout(() => {
+            newPuzzle.move(autoMove);
+            setGame(newPuzzle);
+            setPosition(newPuzzle.fen());
+            setUserMoves([firstMoveUCI]);
+          }, 300); // 🔁 0.3초 후 애니메이션
         }
       }
     } catch (err) {
