@@ -199,8 +199,8 @@ function App() {
 
         setPosition(game.fen());
 
-        const userMove = move.san.replace(/[+#]*/g, '');
-        const correctMove = puzzleSolution[userMoves.length]?.replace(/[+#]*/g, '');
+        const userMove = move.from + move.to + (move.promotion ?? '');
+        const correctMove = puzzleSolution[userMoves.length];
 
         if (userMove === correctMove) {
           const newUserMoves = [...userMoves, userMove];
@@ -225,14 +225,20 @@ function App() {
           } else {
             setPuzzleMessage('👍 계속 진행하세요');
             setTimeout(() => {
-              const nextSan = puzzleSolution[newUserMoves.length];
+              const nextUCI = puzzleSolution[newUserMoves.length]; // ✅ UCI 기반 정답
               const legalMoves = game.moves({ verbose: true });
-              const autoMove = legalMoves.find(m => m.san.replace(/[+#]*/g, '') === nextSan.replace(/[+#]*/g, ''));
+
+              const autoMove = legalMoves.find(
+                m => m.from + m.to + (m.promotion ?? '') === nextUCI
+              );
 
               if (autoMove) {
                 game.move(autoMove);
                 setPosition(game.fen());
-                setUserMoves([...newUserMoves, autoMove.san.replace(/[+#]*/g, '')]);
+                setUserMoves([
+                  ...newUserMoves,
+                  autoMove.from + autoMove.to + (autoMove.promotion ?? '')
+                ]);
                 checkGameOver(game);
               }
             }, 500);

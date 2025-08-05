@@ -42,14 +42,18 @@ def get_puzzle():
     puzzle = random.choice(results)
     conn.close()
 
+    # ✅ FEN 기반 보드 생성 후 SAN → UCI 변환
+    board = chess.Board(puzzle[0])
+    uci_solution = [board.parse_san(m).uci() for m in puzzle[1].split()]
+
     return jsonify({
         "fen": puzzle[0],
-        "solution": puzzle[1].split(),
+        "solution": uci_solution,
         "description": f"난이도 {puzzle[2]}",
-        "hint": puzzle[1].split()[0],
+        "hint": uci_solution[0],
         "puzzle_id": puzzle[4],
     })
-
+    
 @app.route("/ai/puzzle/submit", methods=["POST"])
 def submit_result():
     data = request.get_json()
