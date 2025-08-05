@@ -223,17 +223,24 @@ function App() {
             setPuzzleActive(false);
             setUseAI(false);
 
-            // ✅ 점수 기록 API 호출
-            await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                user_id: userId,
-                puzzle_id: puzzleId,
-                solved: true,
-                time: 10  // 추후 실제 풀이 시간 넣어도 OK
-              })
-            });
+            try {
+              const res = await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  user_id: userId,
+                  puzzle_id: puzzleId,
+                  solved: true,
+                  time: 10
+                })
+              });
+              const result = await res.json();
+              const { new_score, delta } = result;
+
+              alert(`🎉 퍼즐 성공! 현재 점수: ${new_score} (${delta >= 0 ? '+' : ''}${delta})`);
+            } catch (e) {
+              console.error('점수 제출 실패:', e);
+            }
           } else {
             setPuzzleMessage('👍 계속 진행하세요');
             setTimeout(() => {

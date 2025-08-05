@@ -24,6 +24,32 @@ def ensure_indexes():
 
 ensure_indexes()
 
+def ensure_tables():
+    db = sqlite3.connect(DB_PATH)
+    cursor = db.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_profile (
+            user_id TEXT PRIMARY KEY,
+            score INTEGER DEFAULT 1200
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS puzzle_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            puzzle_id TEXT,
+            solved BOOLEAN,
+            time_taken INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    db.commit()
+    db.close()
+
+ensure_indexes()
+ensure_tables()
+
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH)
