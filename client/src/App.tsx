@@ -40,6 +40,7 @@ function App() {
   const [password, setPassword] = useState(''); 
   const [puzzleId, setPuzzleId] = useState<string>('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userScore, setUserScore] = useState<number | null>(null);
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
       ? 'https://checkmateai-s5qg.onrender.com' // 🟢 배포된 Flask 서버 주소
@@ -369,6 +370,7 @@ function App() {
       setGame(newPuzzle);
       setUserMoves([]);
       setPuzzleId(data.puzzle_id); 
+      setUserScore(data.score);
 
       if (data.solution.length > 0) {
         const firstMoveUCI = data.solution[0];
@@ -513,6 +515,7 @@ function App() {
         {/* 👤 로그인 후 이메일 + 로그아웃 중앙 정렬 */}
         <div className="d-flex flex-column align-items-center justify-content-center" style={{ marginTop: 60 }}>
           <p className="text-muted">✅ 로그인됨: {userEmail}</p>
+          <p className="text-muted">✅ 현재 점수: {userScore ?? '불러오는 중...'}</p>
           <button onClick={handleLogout} className="btn btn-outline-secondary">로그아웃</button>
         </div>
       </>
@@ -520,10 +523,9 @@ function App() {
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
       <div style={{ textAlign: 'center', margin: '20px', fontWeight: 'bold', fontSize: 24, color: puzzleMessage.includes('정답') ? 'green' : puzzleMessage.includes('오답') ? 'red' : '#333' }}>
-        {puzzleActive
-          ? `🤔 퍼즐 진행 중 (${turn} 차례)`
-          : puzzleMessage
-            ? `🧩 ${puzzleMessage}`
+        {puzzleMessage.includes('정답') || puzzleMessage.includes('오답') ? '' :
+          puzzleActive
+            ? `🤔 퍼즐 진행 중 (${turn} 차례)`
             : gameOver
               ? `🛑 ${winnerMessage}`
               : `🎯 ${turn} 차례입니다 ${inCheck}`}
@@ -596,27 +598,33 @@ function App() {
       )}
 
       {!puzzleActive && (puzzleMessage.includes('정답') || puzzleMessage.includes('오답')) && (
-        <button
-          onClick={startPuzzle}
-          style={{
-            display: 'block',
-            margin: '10px auto',
-            padding: '10px 20px',
-            fontWeight: 'bold',
-            fontSize: 16,
-            borderRadius: 8,
-            border: 'none',
-            backgroundColor: '#FF9800',
-            color: 'white',
-            cursor: 'pointer',
-            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
-            transition: 'all 0.2s ease-in-out',
-          }}
-          onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#F57C00')}
-          onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#FF9800')}
-        >
-          ▶️ 다음 퍼즐 도전
-        </button>
+        <div style={{ textAlign: 'center', margin: '20px' }}>
+          {!showSolution && (
+            <button
+              onClick={playSolutionSequence}
+              style={{
+                marginRight: 10,
+                padding: '10px 20px',
+                backgroundColor: '#607D8B',
+                color: 'white',
+                borderRadius: 8,
+              }}
+            >
+              ▶️ 정답 수순 보기
+            </button>
+          )}
+          <button
+            onClick={startPuzzle}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#FF9800',
+              color: 'white',
+              borderRadius: 8,
+            }}
+          >
+            ▶️ 다음 퍼즐 도전
+          </button>
+        </div>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 24 }}>

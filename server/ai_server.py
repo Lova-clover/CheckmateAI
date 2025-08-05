@@ -11,6 +11,13 @@ import requests
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = 'https://checkmateai-app.vercel.app'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
 DB_URL = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1" 
 
@@ -115,6 +122,7 @@ def get_puzzle():
         "description": f"난이도 {puzzle[2]}",
         "hint": uci_solution[0],
         "puzzle_id": puzzle[4],
+        "score": score
     })
     
 @app.route("/ai/puzzle/submit", methods=["POST"])
