@@ -31,11 +31,15 @@ def get_puzzle():
         SELECT fen, moves, rating, themes, puzzle_id
         FROM puzzles
         WHERE rating BETWEEN ? AND ?
-        ORDER BY RANDOM()
-        LIMIT 1
+        LIMIT 50
     """, (lower, upper))
 
-    puzzle = cursor.fetchone()
+    results = cursor.fetchall()
+
+    if not results:
+        return jsonify({"error": "No puzzles found"}), 404
+
+    puzzle = random.choice(results)
     conn.close()
 
     return jsonify({

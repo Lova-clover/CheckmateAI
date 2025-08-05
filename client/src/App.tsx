@@ -258,7 +258,17 @@ function App() {
     }
 
     try {
-      const move = game.move({ from: sourceSquare, to: targetSquare });
+      const legalMoves = game.moves({ verbose: true });
+      const matchedMove = legalMoves.find(
+        (m) => m.from === sourceSquare && m.to === targetSquare
+      );
+
+      if (!matchedMove) {
+        console.warn("⚠️ Illegal move:", sourceSquare, targetSquare);
+        return;
+      }
+
+      const move = game.move(matchedMove);
 
       if (move === null) {
         setPosition(game.fen());
