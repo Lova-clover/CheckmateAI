@@ -285,22 +285,35 @@ function App() {
       return;
     }
 
-    const res = await fetch(`${BACKEND_URL}/ai/puzzle?user_id=${userId}`);
-    const data = await res.json();
-    const newPuzzle = new Chess(data.fen);
+    try {
+      console.log("🧩 퍼즐 시작 요청 중... userId:", userId);
+      const res = await fetch(`${BACKEND_URL}/ai/puzzle?user_id=${userId}`);
+      
+      if (!res.ok) {
+        throw new Error(`퍼즐 API 호출 실패: ${res.status} ${res.statusText}`);
+      }
 
-    setPuzzleFen(data.fen);
-    setPuzzleGame(newPuzzle);
-    setPosition(data.fen);
-    setPuzzleSolution(data.solution);
-    setPuzzleHint(data.hint || '');
-    setPuzzleMessage('');
-    setShowHint(false);
-    setShowSolution(false);
-    setPuzzleActive(true);
-    setGame(newPuzzle);
-    setUserMoves([]);
-    setPuzzleId(data.puzzle_id); 
+      const data = await res.json();
+      console.log("✅ 퍼즐 API 응답:", data);
+
+      const newPuzzle = new Chess(data.fen);
+
+      setPuzzleFen(data.fen);
+      setPuzzleGame(newPuzzle);
+      setPosition(data.fen);
+      setPuzzleSolution(data.solution);
+      setPuzzleHint(data.hint || '');
+      setPuzzleMessage('');
+      setShowHint(false);
+      setShowSolution(false);
+      setPuzzleActive(true);
+      setGame(newPuzzle);
+      setUserMoves([]);
+      setPuzzleId(data.puzzle_id); 
+    } catch (err) {
+      console.error("🚨 퍼즐 시작 중 에러:", err);
+      alert("퍼즐을 불러오는데 실패했습니다. 콘솔을 확인하세요.");
+    }
   };
 
   const resetGame = () => {
