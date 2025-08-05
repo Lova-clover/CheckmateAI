@@ -8,7 +8,7 @@ import sqlite3
 import math
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
@@ -74,35 +74,36 @@ def get_puzzle():
     lower = max(600, score - 100)
     upper = min(2400, score + 100)
 
+    # 해당 난이도 구간 퍼즐 개수 먼저 가져옴
     cursor.execute("SELECT COUNT(*) FROM puzzles WHERE rating BETWEEN ? AND ?", (lower, upper))
     count = cursor.fetchone()[0]
 
     if count == 0:
         return jsonify({"error": "No puzzles found"}), 404
 
-    for _ in range(10):  # 최대 10번 시도
-        offset = random.randint(0, max(0, count - 1))
-        cursor.execute("""
-            SELECT fen, moves, rating, themes, puzzle_id
-            FROM puzzles
-            WHERE rating BETWEEN ? AND ?
-            LIMIT 1 OFFSET ?
-        """, (lower, upper, offset))
-        puzzle = cursor.fetchone()
-        board = chess.Board(puzzle[0])
-        try:
-            uci_solution = [board.parse_san(m).uci() for m in puzzle[1].split()]
-            return jsonify({
-                "fen": puzzle[0],
-                "solution": uci_solution,
-                "description": f"난이도 {puzzle[2]}",
-                "hint": uci_solution[0],
-                "puzzle_id": puzzle[4],
-            })
-        except Exception as e:
-            print("⚠️ 퍼즐 변환 실패, 다른 퍼즐 시도 중:", e)
+    # 무작위 오프셋 생성 (속도 매우 빠름)
+    offset = random.randint(0, max(0, count - 1))
 
-    return jsonify({"error": "No valid puzzles found"}), 500
+    # 단 하나의 퍼즐만 가져오기 (ORDER BY 제거로 속도 향상)
+    cursor.execute("""
+        SELECT fen, moves, rating, themes, puzzle_id
+        FROM puzzles
+        WHERE rating BETWEEN ? AND ?
+        LIMIT 1 OFFSET ?
+    """, (lower, upper, offset))
+
+    puzzle = cursor.fetchone()
+    
+    board = chess.Board(puzzle[0])
+    uci_solution = puzzle[1].split()
+
+    return jsonify({
+        "fen": puzzle[0],
+        "solution": uci_solution,
+        "description": f"난이도 {puzzle[2]}",
+        "hint": uci_solution[0],
+        "puzzle_id": puzzle[4],
+    })
     
 @app.route("/ai/puzzle/submit", methods=["POST"])
 def submit_result():
