@@ -12,19 +12,7 @@ import requests
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
-DB_ZIP_URL = "https://www.dropbox.com/scl/fi/qdm5mhlfu9qijcualh7l2/puzzles.zip?rlkey=r2lls0qhtayu6gvmzxhmwl8ic&st=8o2kvm1p&dl=1"
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
-
-if not os.path.exists(DB_PATH):
-    print("📦 puzzles.db not found, downloading from Dropbox...")
-    r = requests.get(DB_ZIP_URL)
-    with open("puzzles.zip", "wb") as f:
-        f.write(r.content)
-    with zipfile.ZipFile("puzzles.zip", "r") as zip_ref:
-        zip_ref.extractall(".")
-    os.remove("puzzles.zip")  # 압축 해제 후 zip 파일 삭제하여 메모리 절약
-    print("✅ puzzles.db ready")
-    
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
