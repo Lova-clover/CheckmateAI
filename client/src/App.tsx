@@ -49,6 +49,7 @@ function App() {
     success_rate: number;
     recent: { puzzle_id: string; solved: boolean; time: number; date: string }[];
   }>(null);
+  const [startTime, setStartTime] = useState<number | null>(null);
 
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
@@ -255,7 +256,7 @@ function App() {
                   user_id: userId,
                   puzzle_id: puzzleId,
                   solved: true,
-                  time: 10
+                  time: startTime ? Math.floor((Date.now() - startTime) / 1000) : 10
                 })
               });
               const result = await res.json();
@@ -301,7 +302,7 @@ function App() {
                 user_id: userId,
                 puzzle_id: puzzleId,
                 solved: false,
-                time: 10
+                time: startTime ? Math.floor((Date.now() - startTime) / 1000) : 10
               })
             });
             const result = await res.json();
@@ -390,6 +391,7 @@ function App() {
       setUserMoves([]);
       setPuzzleId(data.puzzle_id); 
       setUserScore(data.score);
+      setStartTime(Date.now()); 
 
       if (data.solution.length > 0) {
         const firstMoveUCI = data.solution[0];
