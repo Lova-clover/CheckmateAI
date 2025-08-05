@@ -445,6 +445,14 @@ function App() {
     return (
       <div className="container mt-4">
         <h4 className="text-center mb-3">📊 마이페이지</h4>
+
+        {/* ✅ 여기 추가 */}
+        <div className="text-center mt-3">
+          <button className="btn btn-outline-primary" onClick={() => setShowMyPage(false)}>
+            🏠 메인페이지로 돌아가기
+          </button>
+        </div>
+
         <p><strong>현재 점수:</strong> {userStats.score}</p>
         <p><strong>전체 시도:</strong> {userStats.total}회</p>
         <p><strong>성공 횟수:</strong> {userStats.success}회</p>
@@ -474,7 +482,6 @@ function App() {
       </div>
     );
   };
-
   
   const turn = game.turn() === 'w' ? '백' : '흑';
   const inCheck = game.inCheck() ? '체크!' : '';
