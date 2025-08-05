@@ -17,10 +17,11 @@ DB_URL = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=
 # ✅ 파일이 없을 경우 Dropbox에서 다운로드
 if not os.path.exists(DB_PATH):
     print("📦 puzzles.db not found, downloading from Dropbox...")
-    r = requests.get(DB_URL)
+    r = requests.get(DB_URL, stream=True)
     with open(DB_PATH, "wb") as f:
-        f.write(r.content)
-    print("✅ puzzles.db ready")
+        for chunk in r.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
     
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
