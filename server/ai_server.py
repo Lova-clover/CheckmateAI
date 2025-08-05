@@ -66,6 +66,20 @@ def ensure_tables():
     db.commit()
     db.close()
 
+def ensure_columns():
+    db = sqlite3.connect(DB_PATH)
+    cursor = db.cursor()
+    try:
+        cursor.execute("ALTER TABLE puzzle_results ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        print("✅ created_at 컬럼 추가됨")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            print("ℹ️ created_at 컬럼은 이미 존재함")
+        else:
+            raise e
+    db.commit()
+    db.close()
+    
 ensure_indexes()
 ensure_tables()
 

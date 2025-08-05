@@ -581,7 +581,6 @@ function App() {
         {/* 👤 로그인 후 이메일 + 로그아웃 */}
         <div className="d-flex flex-column align-items-center justify-content-center" style={{ marginTop: 60 }}>
           <p className="text-muted">✅ 로그인됨: {userEmail}</p>
-          <p className="text-muted">✅ 현재 점수: {userScore ?? '불러오는 중...'}</p>
           <button onClick={handleLogout} className="btn btn-outline-secondary">로그아웃</button>
         </div>
 
