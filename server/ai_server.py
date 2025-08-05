@@ -22,6 +22,7 @@ if not os.path.exists(DB_PATH):
         f.write(r.content)
     with zipfile.ZipFile("puzzles.zip", "r") as zip_ref:
         zip_ref.extractall(".")
+    os.remove("puzzles.zip")  # 압축 해제 후 zip 파일 삭제하여 메모리 절약
     print("✅ puzzles.db ready")
     
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
