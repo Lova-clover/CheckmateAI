@@ -7,6 +7,20 @@ import os
 import sqlite3
 import math
 import requests
+import firebase_admin
+from firebase_admin import credentials, firestore
+import json
+
+# 환경변수에서 JSON 문자열 불러오기
+firebase_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+
+# 문자열을 딕셔너리로 변환
+firebase_dict = json.loads(firebase_json)
+
+# 인증 초기화
+cred = credentials.Certificate(firebase_dict)
+firebase_admin.initialize_app(cred)
+firestore_db = firestore.client()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
@@ -33,55 +47,6 @@ if not os.path.exists(DB_PATH):
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
-def ensure_indexes():
-    db = sqlite3.connect(DB_PATH)
-    cursor = db.cursor()
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rating ON puzzles(rating)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_puzzle_id ON puzzles(puzzle_id)")
-    db.commit()
-    db.close()
-
-def ensure_tables():
-    db = sqlite3.connect(DB_PATH)
-    cursor = db.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_profile (
-            user_id TEXT PRIMARY KEY,
-            score INTEGER DEFAULT 1200
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS puzzle_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            puzzle_id TEXT,
-            solved BOOLEAN,
-            time_taken INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    db.commit()
-    db.close()
-
-def ensure_columns():
-    db = sqlite3.connect(DB_PATH)
-    cursor = db.cursor()
-    try:
-        cursor.execute("ALTER TABLE puzzle_results ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
-        print("✅ created_at 컬럼 추가됨")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e):
-            print("ℹ️ created_at 컬럼은 이미 존재함")
-        else:
-            raise e
-    db.commit()
-    db.close()
-    
-ensure_indexes()
-ensure_tables()
-ensure_columns()
-
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH)
@@ -99,9 +64,9 @@ def get_puzzle():
     db = get_db()
     cursor = db.cursor()
 
-    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    score = row[0] if row else 1200
+    user_ref = firestore_db.collection("users").document(user_id)
+    user_doc = user_ref.get()
+    score = user_doc.to_dict()["score"] if user_doc.exists else 1200
 
     lower = max(600, score - 100)
     upper = min(2400, score + 100)
@@ -138,45 +103,6 @@ def get_puzzle():
         "score": score
     })
     
-@app.route("/ai/puzzle/submit", methods=["POST"])
-def submit_result():
-    data = request.get_json()
-    user_id = data["user_id"]
-    puzzle_id = data["puzzle_id"]
-    solved = data["solved"]
-    time_taken = data["time"]
-
-    db = get_db()
-    cursor = db.cursor()
-
-    # 퍼즐 난이도 가져오기
-    cursor.execute("SELECT rating FROM puzzles WHERE puzzle_id = ?", (puzzle_id,))
-    puzzle_rating = cursor.fetchone()[0]
-
-    # 유저 점수 가져오기
-    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    user_score = row[0] if row else 1200
-
-    # 점수 차이 기반 업데이트
-    diff = puzzle_rating - user_score
-    delta = 20 + diff // 40 if solved else -15 + diff // 80
-    new_score = max(600, user_score + delta)
-
-    # 저장
-    cursor.execute("""
-        INSERT INTO puzzle_results (user_id, puzzle_id, solved, time_taken)
-        VALUES (?, ?, ?, ?)
-    """, (user_id, puzzle_id, solved, time_taken))
-
-    cursor.execute("""
-        INSERT OR REPLACE INTO user_profile (user_id, score)
-        VALUES (?, ?)
-    """, (user_id, new_score))
-
-    db.commit()
-    return jsonify({"new_score": new_score, "delta": delta})
-
 @app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
 def ai_move():
     if request.method == 'OPTIONS':  # ✅ Preflight 처리
@@ -219,50 +145,72 @@ def ai_move():
         print("🔥 AI 서버 오류:", e)
         return jsonify({'error': str(e)}), 500
 
+@app.route("/ai/puzzle/submit", methods=["POST"])
+def submit_result():
+    data = request.get_json()
+    user_id = data["user_id"]
+    puzzle_id = data["puzzle_id"]
+    solved = data["solved"]
+    time_taken = data["time"]
+
+    # 퍼즐 난이도 (sqlite에서 가져옴)
+    db_sqlite = get_db()
+    cursor = db_sqlite.cursor()
+    cursor.execute("SELECT rating FROM puzzles WHERE puzzle_id = ?", (puzzle_id,))
+    puzzle_rating = cursor.fetchone()[0]
+
+    # Firestore에서 유저 점수 불러오기
+    user_ref = firestore_db.collection("users").document(user_id)
+    user_doc = user_ref.get()
+    score = user_doc.to_dict()["score"] if user_doc.exists else 1200
+
+    # 점수 계산
+    diff = puzzle_rating - score
+    delta = 20 + diff // 40 if solved else -15 + diff // 80
+    new_score = max(600, score + delta)
+
+    # 점수 및 기록 저장
+    user_ref.set({"score": new_score}, merge=True)
+    user_ref.collection("records").add({
+        "puzzle_id": puzzle_id,
+        "solved": solved,
+        "time": time_taken,
+        "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
+    return jsonify({"new_score": new_score, "delta": delta})
+
 @app.route("/ai/user/stats", methods=["GET"])
 def user_stats():
-    try:
-        user_id = request.args.get("user_id")
-        db = get_db()
-        cursor = db.cursor()
+    user_id = request.args.get("user_id")
+    user_ref = firestore_db.collection("users").document(user_id)
+    user_doc = user_ref.get()
+    score = user_doc.to_dict()["score"] if user_doc.exists else 1200
 
-        # ✅ 유저 점수 가져오기 (없으면 1200)
-        cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
-        score = row[0] if row else 1200
+    records_ref = user_ref.collection("records").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(5)
+    recent_records = records_ref.stream()
 
-        # 전체 시도 수 / 성공 수
-        cursor.execute("SELECT COUNT(*), SUM(solved) FROM puzzle_results WHERE user_id = ?", (user_id,))
-        total, success = cursor.fetchone()
-        total = total or 0
-        success = success or 0
-        rate = round(success / total * 100, 1) if total > 0 else 0.0
-
-        # 최근 기록 (created_at 컬럼이 있어야 함)
-        cursor.execute("""
-            SELECT puzzle_id, solved, time_taken, created_at
-            FROM puzzle_results
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT 5
-        """, (user_id,))
-        recent = [
-            {
-                "puzzle_id": row[0],
-                "solved": bool(row[1]),
-                "time": row[2],
-                "date": row[3]
-            }
-            for row in cursor.fetchall()
-        ]
-
-        return jsonify({
-            "score": score,
-            "total": total,
-            "success": success,
-            "success_rate": rate,
-            "recent": recent
+    total = 0
+    success = 0
+    recent = []
+    for r in recent_records:
+        data = r.to_dict()
+        total += 1
+        if data.get("solved"):
+            success += 1
+        recent.append({
+            "puzzle_id": data.get("puzzle_id"),
+            "solved": data.get("solved"),
+            "time": data.get("time"),
+            "date": data.get("timestamp").isoformat() if data.get("timestamp") else None
         })
-    except Exception as e:
-        print("❌ 마이페이지 API 실패:", e)
-        return jsonify({"error": "server error", "details": str(e)}), 500
+
+    rate = round(success / total * 100, 1) if total > 0 else 0.0
+
+    return jsonify({
+        "score": score,
+        "total": total,
+        "success": success,
+        "success_rate": rate,
+        "recent": recent
+    })
