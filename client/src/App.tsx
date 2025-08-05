@@ -358,7 +358,7 @@ function App() {
             setGame(newPuzzle);
             setPosition(newPuzzle.fen());
             setUserMoves([firstMoveUCI]);
-          }, 600); // 🔁 0.6초 후 애니메이션
+          }, 1000); // 🔁 1초 후 애니메이션
         }
       }
     } catch (err) {
