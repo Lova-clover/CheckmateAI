@@ -10,7 +10,7 @@ import zipfile
 import requests
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}})
+CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
 DB_ZIP_URL = "https://www.dropbox.com/scl/fi/qdm5mhlfu9qijcualh7l2/puzzles.zip?rlkey=r2lls0qhtayu6gvmzxhmwl8ic&st=8o2kvm1p&dl=1"
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
