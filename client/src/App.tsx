@@ -265,7 +265,10 @@ function App() {
         } else {
           game.undo();
           setPosition(game.fen());
-          setPuzzleMessage('❌ 오답입니다. 다시 시도하세요.');
+          setPuzzleMessage('❌ 오답입니다. 퍼즐이 종료되었습니다.');
+          setPuzzleActive(false); // 🔴 퍼즐 종료
+          setUseAI(false);        // AI도 끔
+
           try {
             await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
               method: 'POST',
@@ -277,6 +280,8 @@ function App() {
                 time: 10
               })
             });
+
+            alert("❌ 퍼즐 실패! 점수가 감소합니다.");
           } catch (e) {
             console.error('오답 제출 실패:', e);
           }
@@ -470,6 +475,23 @@ function App() {
     </div>
   );
 
+  const playSolutionSequence = async () => {
+    if (puzzleSolution.length === 0) return;
+
+    const tempGame = new Chess(puzzleFen);
+    for (const move of puzzleSolution) {
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // 1초 간격
+      const legal = tempGame.moves({ verbose: true }).find(
+        m => m.from + m.to + (m.promotion ?? '') === move
+      );
+      if (legal) {
+        tempGame.move(legal);
+        setGame(tempGame);
+        setPosition(tempGame.fen());
+      }
+    }
+  };
+
   return (
       <>
     {!userId ? (
@@ -505,6 +527,22 @@ function App() {
         </div>
       )}
 
+      {!puzzleActive && puzzleMessage.includes('오답') && (
+        <button
+          onClick={playSolutionSequence}
+          style={{
+            display: 'block',
+            margin: '10px auto',
+            padding: '10px 20px',
+            backgroundColor: '#607D8B',
+            color: 'white',
+            borderRadius: 8,
+          }}
+        >
+          ▶️ 정답 수순 보기
+        </button>
+      )}
+
       {puzzleActive && (
         <div style={{ textAlign: 'center', margin: '12px 0' }}>
           <button
@@ -514,8 +552,26 @@ function App() {
             💡 힌트 보기
           </button>
           <button
-            onClick={() => setShowSolution(true)}
-            style={{ margin: '0 10px', padding: '6px 12px', borderRadius: 6, fontSize: 14 }}
+            onClick={async () => {
+              setShowSolution(true);
+              setPuzzleActive(false);
+              setUseAI(false);
+              try {
+                await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_id: userId,
+                    puzzle_id: puzzleId,
+                    solved: false,
+                    time: 10
+                  })
+                });
+                alert("정답을 열람하였습니다. 점수가 감소합니다.");
+              } catch (e) {
+                console.error('정답 열람 실패:', e);
+              }
+            }}
           >
             ✅ 정답 보기
           </button>
