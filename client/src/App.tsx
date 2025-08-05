@@ -118,7 +118,6 @@ function App() {
       promotion,
     };
 
-    // 🛠️ 체크: 해당 move가 유효한지 사전에 확인
     const legalMoves = game.moves({ verbose: true });
     const isLegal = legalMoves.some(
       (m) =>
@@ -140,6 +139,12 @@ function App() {
       setPosition(game.fen());
       updateMovePairs(game.history({ verbose: true }));
       checkGameOver(game);
+
+      if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
+        setTimeout(() => {
+          playAIMove();
+        }, 300);
+      }
     }
 
     setPromotionModalOpen(false);
@@ -284,11 +289,11 @@ function App() {
       setPosition(game.fen());
       updateMovePairs(game.history({ verbose: true }));
       checkGameOver(game);
-      if (useAI && game.turn() === 'b' && !game.isGameOver()) {
-          setTimeout(() => {
-            playAIMove();
-          }, 300);
-        }
+      if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
+        setTimeout(() => {
+          playAIMove();
+        }, 300);
+      }
     } catch (error) {
       console.warn('잘못된 수입니다:', error);
       setPosition(game.fen()); // 원래 위치로 복원
@@ -326,6 +331,20 @@ function App() {
       setGame(newPuzzle);
       setUserMoves([]);
       setPuzzleId(data.puzzle_id); 
+
+      if (data.solution.length > 0) {
+        const firstMoveUCI = data.solution[0];
+        const legalMoves = newPuzzle.moves({ verbose: true });
+        const autoMove = legalMoves.find(
+          m => m.from + m.to + (m.promotion ?? '') === firstMoveUCI
+        );
+
+        if (autoMove) {
+          newPuzzle.move(autoMove);
+          setPosition(newPuzzle.fen());
+          setUserMoves([firstMoveUCI]);
+        }
+      }
     } catch (err) {
       console.error("🚨 퍼즐 시작 중 에러:", err);
       alert("퍼즐을 불러오는데 실패했습니다. 콘솔을 확인하세요.");

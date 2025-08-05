@@ -5,6 +5,7 @@ from flask_cors import CORS
 import random
 import os
 import sqlite3
+import math
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}})
@@ -19,27 +20,33 @@ def get_puzzle():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 사용자 점수 가져오기
     cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     score = row[0] if row else 1200
 
-    # 추천 퍼즐 (±100)
     lower = max(600, score - 100)
     upper = min(2400, score + 100)
+
+    # 해당 난이도 구간 퍼즐 개수 먼저 가져옴
+    cursor.execute("SELECT COUNT(*) FROM puzzles WHERE rating BETWEEN ? AND ?", (lower, upper))
+    count = cursor.fetchone()[0]
+
+    if count == 0:
+        conn.close()
+        return jsonify({"error": "No puzzles found"}), 404
+
+    # 무작위 오프셋 생성 (속도 매우 빠름)
+    offset = random.randint(0, max(0, count - 1))
+
+    # 단 하나의 퍼즐만 가져오기 (ORDER BY 제거로 속도 향상)
     cursor.execute("""
         SELECT fen, moves, rating, themes, puzzle_id
         FROM puzzles
         WHERE rating BETWEEN ? AND ?
-        LIMIT 50
-    """, (lower, upper))
+        LIMIT 1 OFFSET ?
+    """, (lower, upper, offset))
 
-    results = cursor.fetchall()
-
-    if not results:
-        return jsonify({"error": "No puzzles found"}), 404
-
-    puzzle = random.choice(results)
+    puzzle = cursor.fetchone()
     conn.close()
 
     # ✅ FEN 기반 보드 생성 후 SAN → UCI 변환
