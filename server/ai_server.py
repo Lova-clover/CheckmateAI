@@ -74,13 +74,16 @@ def close_connection(exception):
     if db is not None:
         db.close()
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 @app.route("/ai/puzzle", methods=["GET"])
 def get_puzzle():
     import time
     t0 = time.time()
 
     user_id = request.args.get("user_id")
-    print(f"[{time.time() - t0:.2f}s] 유저 요청 수신: {user_id}")
+    logging.info(f"[{time.time() - t0:.2f}s] 유저 요청 수신: {user_id}")
     
     db = get_db()
     cursor = db.cursor()
@@ -88,14 +91,14 @@ def get_puzzle():
     cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     score = row[0] if row else 1200
-    print(f"[{time.time() - t0:.2f}s] 유저 점수 로딩 완료: {score}")
+    logging.info(f"[{time.time() - t0:.2f}s] 유저 점수 로딩 완료: {score}")
 
     lower = max(600, score - 100)
     upper = min(2400, score + 100)
 
     cursor.execute("SELECT COUNT(*) FROM puzzles WHERE rating BETWEEN ? AND ?", (lower, upper))
     count = cursor.fetchone()[0]
-    print(f"[{time.time() - t0:.2f}s] 퍼즐 개수 확인: {count}")
+    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 개수 확인: {count}")
 
     if count == 0:
         return jsonify({"error": "No puzzles found"}), 404
@@ -109,11 +112,11 @@ def get_puzzle():
         LIMIT 1 OFFSET ?
     """, (lower, upper, offset))
     puzzle = cursor.fetchone()
-    print(f"[{time.time() - t0:.2f}s] 퍼즐 1개 로딩 완료")
+    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 1개 로딩 완료")
 
     board = chess.Board(puzzle[0])
     uci_solution = [board.parse_san(m).uci() for m in puzzle[1].split()]
-    print(f"[{time.time() - t0:.2f}s] 퍼즐 변환 및 응답 준비 완료")
+    logging.info(f"[{time.time() - t0:.2f}s] 퍼즐 변환 및 응답 준비 완료")
 
     return jsonify({
         "fen": puzzle[0],
