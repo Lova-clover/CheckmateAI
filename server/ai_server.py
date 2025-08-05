@@ -41,8 +41,6 @@ def ensure_indexes():
     db.commit()
     db.close()
 
-ensure_indexes()
-
 def ensure_tables():
     db = sqlite3.connect(DB_PATH)
     cursor = db.cursor()
@@ -82,6 +80,7 @@ def ensure_columns():
     
 ensure_indexes()
 ensure_tables()
+ensure_columns()
 
 def get_db():
     if 'db' not in g:
