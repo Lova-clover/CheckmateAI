@@ -519,12 +519,14 @@ function App() {
       {renderPromotionModal()}
       {renderAIModeToggle()}
       {renderAIDifficultySelector()}
-      <div style={{ textAlign: 'center', margin: '20px', fontWeight: 'bold', fontSize: 24, color: gameOver ? 'red' : '#333' }}>
+      <div style={{ textAlign: 'center', margin: '20px', fontWeight: 'bold', fontSize: 24, color: puzzleMessage.includes('정답') ? 'green' : puzzleMessage.includes('오답') ? 'red' : '#333' }}>
         {puzzleActive
-          ? `🤔 퍼즐 진행 중`
-          : gameOver
-            ? `🛑 ${winnerMessage}`
-            : `🎯 ${turn} 차례입니다 ${inCheck}`}
+          ? `🤔 퍼즐 진행 중 (${turn} 차례)`
+          : puzzleMessage
+            ? `🧩 ${puzzleMessage}`
+            : gameOver
+              ? `🛑 ${winnerMessage}`
+              : `🎯 ${turn} 차례입니다 ${inCheck}`}
       </div>
 
       {puzzleActive && (
@@ -574,6 +576,7 @@ function App() {
                   })
                 });
                 alert("정답을 열람하였습니다. 점수가 감소합니다.");
+                await playSolutionSequence();  // ✅ 정답 수순 재생
               } catch (e) {
                 console.error('정답 열람 실패:', e);
               }
@@ -592,7 +595,7 @@ function App() {
         </div>
       )}
 
-      {!puzzleActive && puzzleMessage === '🎉 정답입니다!' && (
+      {!puzzleActive && (puzzleMessage.includes('정답') || puzzleMessage.includes('오답')) && (
         <button
           onClick={startPuzzle}
           style={{

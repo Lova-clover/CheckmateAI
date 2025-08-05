@@ -163,14 +163,14 @@ def ai_move():
             if random.random() < 0.9:
                 move = random.choice(list(board.legal_moves))
             else:
-                result = engine.play(board, chess.engine.Limit(depth=1))
+                result = engine.play(board, chess.engine.Limit(depth=1, time=0.3))
                 move = result.move
         elif level == 'medium':
             if random.random() < 0.6:
-                result = engine.play(board, chess.engine.Limit(depth=2))
+                result = engine.play(board, chess.engine.Limit(depth=2, time=0.5))
                 move = result.move
             else:
-                info = engine.analyse(board, chess.engine.Limit(depth=2), multipv=3)
+                info = engine.analyse(board, chess.engine.Limit(depth=2, time=1.0), multipv=3)
                 candidates = [entry["pv"][0] for entry in info if "pv" in entry]
                 if candidates:
                     move = random.choice(candidates)
