@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 import chess
 import chess.engine
 from flask_cors import CORS
@@ -14,11 +14,32 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
+def ensure_indexes():
+    db = sqlite3.connect(DB_PATH)
+    cursor = db.cursor()
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rating ON puzzles(rating)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_puzzle_id ON puzzles(puzzle_id)")
+    db.commit()
+    db.close()
+
+ensure_indexes()
+
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH)
+    return g.db
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
 @app.route("/ai/puzzle", methods=["GET"])
 def get_puzzle():
     user_id = request.args.get("user_id")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    db = get_db()
+    cursor = db.cursor()
 
     cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
@@ -32,7 +53,6 @@ def get_puzzle():
     count = cursor.fetchone()[0]
 
     if count == 0:
-        conn.close()
         return jsonify({"error": "No puzzles found"}), 404
 
     # 무작위 오프셋 생성 (속도 매우 빠름)
@@ -47,7 +67,6 @@ def get_puzzle():
     """, (lower, upper, offset))
 
     puzzle = cursor.fetchone()
-    conn.close()
 
     # ✅ FEN 기반 보드 생성 후 SAN → UCI 변환
     board = chess.Board(puzzle[0])
@@ -69,8 +88,8 @@ def submit_result():
     solved = data["solved"]
     time_taken = data["time"]
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    db = get_db()
+    cursor = db.cursor()
 
     # 퍼즐 난이도 가져오기
     cursor.execute("SELECT rating FROM puzzles WHERE puzzle_id = ?", (puzzle_id,))
@@ -97,9 +116,7 @@ def submit_result():
         VALUES (?, ?)
     """, (user_id, new_score))
 
-    conn.commit()
-    conn.close()
-
+    db.commit()
     return jsonify({"new_score": new_score, "delta": delta})
 
 @app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
