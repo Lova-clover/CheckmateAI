@@ -7,18 +7,11 @@ import os
 import sqlite3
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}})
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-
-@app.after_request
-def after_request(response):
-    response.headers['Access-Control-Allow-Origin'] = 'https://checkmateai-app.vercel.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
-    return response
 
 @app.route("/ai/puzzle", methods=["GET"])
 def get_puzzle():
