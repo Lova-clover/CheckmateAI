@@ -206,3 +206,38 @@ def ai_move():
         print("🔥 AI 서버 오류:", e)
         return jsonify({'error': str(e)}), 500
 
+@app.route("/ai/user/stats", methods=["GET"])
+def user_stats():
+    user_id = request.args.get("user_id")
+    db = get_db()
+    cursor = db.cursor()
+
+    # 점수
+    cursor.execute("SELECT score FROM user_profile WHERE user_id = ?", (user_id,))
+    score = cursor.fetchone()[0]
+
+    # 퍼즐 통계
+    cursor.execute("SELECT COUNT(*), SUM(CASE WHEN solved THEN 1 ELSE 0 END) FROM puzzle_results WHERE user_id = ?", (user_id,))
+    total, success = cursor.fetchone()
+    success_rate = (success or 0) / total * 100 if total > 0 else 0
+
+    # 최근 5개 결과
+    cursor.execute("""
+        SELECT puzzle_id, solved, time_taken, created_at
+        FROM puzzle_results
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5
+    """, (user_id,))
+    recent = cursor.fetchall()
+
+    return jsonify({
+        "score": score,
+        "total": total,
+        "success": success or 0,
+        "success_rate": round(success_rate, 1),
+        "recent": [
+            {"puzzle_id": r[0], "solved": bool(r[1]), "time": r[2], "date": r[3]}
+            for r in recent
+        ]
+    })

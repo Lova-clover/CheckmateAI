@@ -41,6 +41,15 @@ function App() {
   const [puzzleId, setPuzzleId] = useState<string>('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userScore, setUserScore] = useState<number | null>(null);
+  const [showMyPage, setShowMyPage] = useState(false);
+  const [userStats, setUserStats] = useState<null | {
+    score: number;
+    total: number;
+    success: number;
+    success_rate: number;
+    recent: { puzzle_id: string; solved: boolean; time: number; date: string }[];
+  }>(null);
+
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
       ? 'https://checkmateai-s5qg.onrender.com' // 🟢 배포된 Flask 서버 주소
@@ -175,38 +184,46 @@ function App() {
     }
   };
   
+  function fetchWithTimeout(resource: RequestInfo, options: any = {}, timeout = 10000): Promise<Response> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("⏱ 요청 시간이 초과되었습니다.")), timeout);
+      fetch(resource, options)
+        .then(response => {
+          clearTimeout(timer);
+          resolve(response);
+        })
+        .catch(err => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  }
+
   const playAIMove = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/ai/move`, {
+      const res = await fetchWithTimeout(`${BACKEND_URL}/ai/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fen: game.fen(), level: aiLevel }),
-      });
-      const data = await res.json();
+      }, 5000);  // ⏱ 10초 제한
 
-      if (!data.move) return;
+      const data = await res.json();
+      if (!data.move) throw new Error("AI 응답 없음");
 
       const from = data.move.slice(0, 2);
       const to = data.move.slice(2, 4);
-
-      const piece = game.get(from);
-      const isPromotion = piece?.type === 'p' && ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1'));
-
-      const move = game.move({
-        from,
-        to,
-        ...(isPromotion ? { promotion: 'q' } : {}) // 조건부로 promotion 추가
-      });
-
+      const move = game.move({ from, to, promotion: 'q' });
       if (move) {
         setPosition(game.fen());
         updateMovePairs(game.history({ verbose: true }));
         checkGameOver(game);
       }
     } catch (error) {
-      console.error('AI 호출 실패:', error);
+      console.error("❌ AI 호출 실패:", error);
+      alert("AI 응답에 실패했습니다. 네트워크나 서버 상태를 확인해주세요.");
     }
   };
+
 
   const onDrop = async ({ sourceSquare, targetSquare }: { sourceSquare: Square; targetSquare: Square }) => {
     if (game.isGameOver()) return;
@@ -411,6 +428,54 @@ function App() {
     }
   }, [game.fen(), useAI, puzzleActive]); 
 
+  const fetchUserStats = async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/ai/user/stats?user_id=${userId}`);
+      const data = await res.json();
+      setUserStats(data);
+    } catch (e) {
+      console.error("마이페이지 불러오기 실패:", e);
+    }
+  };
+
+  const renderMyPage = () => {
+    if (!userStats) return <p className="text-center mt-4">📡 불러오는 중...</p>;
+
+    return (
+      <div className="container mt-4">
+        <h4 className="text-center mb-3">📊 마이페이지</h4>
+        <p><strong>현재 점수:</strong> {userStats.score}</p>
+        <p><strong>전체 시도:</strong> {userStats.total}회</p>
+        <p><strong>성공 횟수:</strong> {userStats.success}회</p>
+        <p><strong>성공률:</strong> {userStats.success_rate}%</p>
+
+        <h5 className="mt-4">🕓 최근 5개 퍼즐 기록</h5>
+        <table className="table table-striped">
+          <thead>
+            <tr>
+              <th>퍼즐 ID</th>
+              <th>성공 여부</th>
+              <th>걸린 시간</th>
+              <th>날짜</th>
+            </tr>
+          </thead>
+          <tbody>
+            {userStats.recent.map((r, idx) => (
+              <tr key={idx}>
+                <td>{r.puzzle_id}</td>
+                <td>{r.solved ? "✅ 성공" : "❌ 실패"}</td>
+                <td>{r.time}s</td>
+                <td>{new Date(r.date).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  
   const turn = game.turn() === 'w' ? '백' : '흑';
   const inCheck = game.inCheck() ? '체크!' : '';
   const gameOver = game.isGameOver();
@@ -501,27 +566,40 @@ function App() {
   };
 
   return (
-      <>
+  <>
     {!userId ? (
       renderAuthForm()
+    ) : showMyPage ? (
+      renderMyPage()
     ) : (
       <>
-      <>
-        {/* 🔝 맨 위 제목 */}
+        {/* 기존 UI 전체를 이 블록에 넣어야 합니다 */}
         <div className="text-center py-3 bg-light shadow-sm">
           <h4 className="fw-bold text-primary m-0">CheckmateAI ♟️</h4>
         </div>
 
-        {/* 👤 로그인 후 이메일 + 로그아웃 중앙 정렬 */}
+        {/* 👤 로그인 후 이메일 + 로그아웃 */}
         <div className="d-flex flex-column align-items-center justify-content-center" style={{ marginTop: 60 }}>
           <p className="text-muted">✅ 로그인됨: {userEmail}</p>
           <p className="text-muted">✅ 현재 점수: {userScore ?? '불러오는 중...'}</p>
           <button onClick={handleLogout} className="btn btn-outline-secondary">로그아웃</button>
         </div>
-      </>
-      {renderPromotionModal()}
-      {renderAIModeToggle()}
-      {renderAIDifficultySelector()}
+
+        {/* 마이페이지 버튼 */}
+        <div className="text-center mt-3">
+          <button
+            className="btn btn-outline-dark"
+            onClick={() => {
+              setShowMyPage(true);
+              fetchUserStats();
+            }}
+          >
+            📊 마이페이지
+          </button>
+        </div>
+        {renderPromotionModal()}
+        {renderAIModeToggle()}
+        {renderAIDifficultySelector()}
       <div style={{ textAlign: 'center', margin: '20px', fontWeight: 'bold', fontSize: 24, color: puzzleMessage.includes('정답') ? 'green' : puzzleMessage.includes('오답') ? 'red' : '#333' }}>
         {puzzleMessage.includes('정답') || puzzleMessage.includes('오답') ? '' :
           puzzleActive
@@ -537,22 +615,6 @@ function App() {
         </div>
       )}
 
-      {!puzzleActive && puzzleMessage.includes('오답') && (
-        <button
-          onClick={playSolutionSequence}
-          style={{
-            display: 'block',
-            margin: '10px auto',
-            padding: '10px 20px',
-            backgroundColor: '#607D8B',
-            color: 'white',
-            borderRadius: 8,
-          }}
-        >
-          ▶️ 정답 수순 보기
-        </button>
-      )}
-
       {puzzleActive && (
         <div style={{ textAlign: 'center', margin: '12px 0' }}>
           <button
@@ -561,11 +623,14 @@ function App() {
           >
             💡 힌트 보기
           </button>
+          {!showSolution && (
           <button
             onClick={async () => {
               setShowSolution(true);
               setPuzzleActive(false);
               setUseAI(false);
+              setPuzzleMessage('');
+              setWinnerMessage('');
               try {
                 await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
                   method: 'POST',
@@ -583,9 +648,17 @@ function App() {
                 console.error('정답 열람 실패:', e);
               }
             }}
+            style={{
+              marginRight: 10,
+              padding: '10px 20px',
+              backgroundColor: '#607D8B',
+              color: 'white',
+              borderRadius: 8,
+            }}
           >
-            ✅ 정답 보기
+            ▶️ 정답 수순 보기
           </button>
+          )}
           <div style={{ marginTop: 10 }}>
             {showHint && <div style={{ fontStyle: 'italic', color: '#555' }}>힌트: {puzzleHint || '없음'}</div>}
             {showSolution && (
