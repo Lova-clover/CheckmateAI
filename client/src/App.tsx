@@ -294,7 +294,7 @@ function App() {
           setUseAI(false);        // AI도 끔
 
           try {
-            await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
+            const res = await fetch(`${BACKEND_URL}/ai/puzzle/submit`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -304,8 +304,10 @@ function App() {
                 time: 10
               })
             });
+            const result = await res.json();
+            const { new_score, delta } = result;
 
-            alert("❌ 퍼즐 실패! 점수가 감소합니다.");
+            alert(`❌ 퍼즐 실패! 현재 점수: ${new_score} (${delta >= 0 ? '+' : ''}${delta})`);
           } catch (e) {
             console.error('오답 제출 실패:', e);
           }
@@ -445,8 +447,6 @@ function App() {
     return (
       <div className="container mt-4">
         <h4 className="text-center mb-3">📊 마이페이지</h4>
-
-        {/* ✅ 여기 추가 */}
         <div className="text-center mt-3">
           <button className="btn btn-outline-primary" onClick={() => setShowMyPage(false)}>
             🏠 메인페이지로 돌아가기
