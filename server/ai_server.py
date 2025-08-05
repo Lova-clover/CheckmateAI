@@ -6,11 +6,22 @@ import random
 import os
 import sqlite3
 import math
+import requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
+DB_URL = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1" 
+
+# ✅ 파일이 없을 경우 Dropbox에서 다운로드
+if not os.path.exists(DB_PATH):
+    print("📦 puzzles.db not found, downloading from Dropbox...")
+    r = requests.get(DB_URL)
+    with open(DB_PATH, "wb") as f:
+        f.write(r.content)
+    print("✅ puzzles.db ready")
+    
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
