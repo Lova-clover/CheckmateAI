@@ -23,13 +23,13 @@ firebase_admin.initialize_app(cred)
 firestore_db = firestore.client()
 
 app = Flask(__name__)
-CORS(app, origins=["https://checkmateai-app.vercel.app"], supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers.setdefault('Access-Control-Allow-Origin', 'https://checkmateai-app.vercel.app')
-    response.headers.setdefault('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.setdefault('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers['Access-Control-Allow-Origin'] = 'https://checkmateai-app.vercel.app'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
     return response
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
@@ -43,8 +43,6 @@ if not os.path.exists(DB_PATH):
         for chunk in r.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
-   
-engine = None   
     
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
@@ -105,11 +103,9 @@ def get_puzzle():
         "score": score
     })
     
-@app.route('/ai/move', methods=['POST', 'OPTIONS'])
+@app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
 def ai_move():
-    global engine  # 🔑 전역 엔진 재할당을 위해 필요
-
-    if request.method == 'OPTIONS':
+    if request.method == 'OPTIONS':  # ✅ Preflight 처리
         return '', 200
 
     data = request.get_json()
@@ -123,51 +119,31 @@ def ai_move():
 
     try:
         if level == 'easy':
-            try:
-                # 낮은 depth, 낮은 time, 더 많은 multipv
-                info = engine.analyse(board, chess.engine.Limit(depth=1, time=0.2), multipv=10, timeout=1.0)
-
-                # 아예 4번째 수 이후만 추출 → 4등~10등 중 랜덤
-                bad_candidates = [entry["pv"][0] for entry in info[3:] if "pv" in entry]
-                
-                if bad_candidates:
-                    move = random.choice(bad_candidates)
-                else:
-                    move = random.choice(list(board.legal_moves))  # fallback
-            except Exception as e:
-                print("⚠️ easy 모드 fallback:", e)
+            if random.random() < 0.9:
                 move = random.choice(list(board.legal_moves))
+            else:
+                result = engine.play(board, chess.engine.Limit(depth=1, time=0.3))
+                move = result.move
         elif level == 'medium':
             if random.random() < 0.6:
-                result = engine.play(board, chess.engine.Limit(depth=2, time=0.5), timeout=2.0)
+                result = engine.play(board, chess.engine.Limit(depth=2, time=0.5))
                 move = result.move
             else:
-                info = engine.analyse(board, chess.engine.Limit(depth=2, time=1.0), multipv=3, timeout=3.0)
+                info = engine.analyse(board, chess.engine.Limit(depth=2, time=1.0), multipv=3)
                 candidates = [entry["pv"][0] for entry in info if "pv" in entry]
-                move = random.choice(candidates) if candidates else engine.play(board, chess.engine.Limit(depth=2), timeout=2.0).move
+                if candidates:
+                    move = random.choice(candidates)
+                else:
+                    result = engine.play(board, chess.engine.Limit(depth=2))
+                    move = result.move
         else:
-            result = engine.play(board, chess.engine.Limit(depth=4), timeout=3.0)
+            result = engine.play(board, chess.engine.Limit(depth=4))
             move = result.move
 
         return jsonify({'move': move.uci()})
-
     except Exception as e:
-        print("🔥 Stockfish 오류 발생:", e)
-
-        # 🔁 엔진 재시작
-        try:
-            engine.quit()
-        except Exception as qe:
-            print("⚠️ 엔진 종료 실패:", qe)
-
-        try:
-            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-            print("✅ Stockfish 재시작 완료")
-        except Exception as re:
-            print("❌ Stockfish 재시작 실패:", re)
-            return jsonify({'error': 'Stockfish 재시작 실패'}), 500
-
-        return jsonify({'error': 'Stockfish 오류로 인해 AI가 재시작되었습니다.'}), 500
+        print("🔥 AI 서버 오류:", e)
+        return jsonify({'error': str(e)}), 500
 
 @app.route("/ai/puzzle/submit", methods=["POST"])
 def submit_result():
@@ -211,37 +187,26 @@ def user_stats():
     user_doc = user_ref.get()
     score = user_doc.to_dict()["score"] if user_doc.exists else 1200
 
-    # 퍼즐 통계
+    # 전체 기록 가져와서 전체 통계 계산
     all_records = list(user_ref.collection("records").stream())
     total = len(all_records)
     success = sum(1 for r in all_records if r.to_dict().get("solved"))
     rate = round(success / total * 100, 1) if total > 0 else 0.0
 
-    # 최근 퍼즐
+    # 최근 5개만 별도로 가져오기
     records_ref = user_ref.collection("records") \
         .order_by("timestamp", direction=firestore.Query.DESCENDING) \
         .limit(5)
     recent_records = records_ref.stream()
-    recent = [{
-        "puzzle_id": r.to_dict().get("puzzle_id"),
-        "solved": r.to_dict().get("solved"),
-        "time": r.to_dict().get("time"),
-        "date": r.to_dict().get("timestamp").isoformat() if r.to_dict().get("timestamp") else None
-    } for r in recent_records]
 
-    # 🔧 최근 AI 대국 추가
-    game_ref = user_ref.collection("game_records") \
-        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
-        .limit(5)
-    recent_games = game_ref.stream()
-    game_list = []
-    for g in recent_games:
-        d = g.to_dict()
-        game_list.append({
-            "game_id": g.id,
-            "result": d.get("result"),
-            "moves": len(d.get("moves", [])),
-            "date": d.get("timestamp").isoformat() if d.get("timestamp") else None
+    recent = []
+    for r in recent_records:
+        data = r.to_dict()
+        recent.append({
+            "puzzle_id": data.get("puzzle_id"),
+            "solved": data.get("solved"),
+            "time": data.get("time"),
+            "date": data.get("timestamp").isoformat() if data.get("timestamp") else None
         })
 
     return jsonify({
@@ -249,122 +214,5 @@ def user_stats():
         "total": total,
         "success": success,
         "success_rate": rate,
-        "recent": recent,
-        "recent_games": game_list  # ✅ 추가됨
-    })
-
-@app.route("/ai/game/submit", methods=["POST"])
-def submit_game_result():
-    data = request.get_json()
-    user_id = data["user_id"]
-    result = data["result"]  # 'win', 'loss', 'draw'
-    time_taken = data.get("time", 0)
-    moves = data.get("moves", [])  # UCI 리스트
-
-    user_ref = firestore_db.collection("users").document(user_id)
-    user_ref.collection("game_records").add({
-        "result": result,
-        "time": time_taken,
-        "moves": moves,
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
-
-    return jsonify({"message": "Game record saved"})
-
-@app.route("/ai/game/stats", methods=["GET"])
-def get_game_stats():
-    user_id = request.args.get("user_id")
-    user_ref = firestore_db.collection("users").document(user_id)
-
-    records = user_ref.collection("game_records") \
-                      .order_by("timestamp", direction=firestore.Query.DESCENDING) \
-                      .limit(5).stream()
-
-    recent = []
-    total = 0
-    win = 0
-    for r in records:
-        data = r.to_dict()
-        total += 1
-        if data["result"] == "win":
-            win += 1
-        recent.append({
-            "result": data["result"],
-            "time": data["time"],
-            "date": data["timestamp"].isoformat() if data.get("timestamp") else None
-        })
-
-    return jsonify({
-        "total": total,
-        "win": win,
-        "win_rate": round(win / total * 100, 1) if total > 0 else 0.0,
         "recent": recent
     })
-
-@app.route("/ai/move/winrate", methods=["GET"])
-def get_move_winrate():
-    user_id = request.args.get("user_id")
-    user_ref = firestore_db.collection("users").document(user_id)
-    records = user_ref.collection("game_records").stream()
-
-    winrate_by_move = {}
-    for r in records:
-        data = r.to_dict()
-        result = data["result"]
-        moves = data.get("moves", [])
-
-        for move in moves:
-            if move not in winrate_by_move:
-                winrate_by_move[move] = {"total": 0, "win": 0}
-            winrate_by_move[move]["total"] += 1
-            if result == "win":
-                winrate_by_move[move]["win"] += 1
-
-    return jsonify(winrate_by_move)
-
-@app.route("/ai/eval", methods=["POST"])
-def evaluate_move():
-    try:
-        data = request.get_json()
-        fen = data.get("fen")
-        move = data.get("move")  # UCI 형식: 'e2e4'
-
-        board = chess.Board(fen)
-        move_obj = chess.Move.from_uci(move)
-
-        if not board.is_legal(move_obj):
-            return jsonify({"error": f"illegal move: '{move}' in {fen}"}), 400
-
-        board.push(move_obj)
-
-        info = engine.analyse(board, chess.engine.Limit(depth=12))
-        score = info["score"].white().score(mate_score=10000)
-
-        if score is None:
-            win, draw, loss = 33.3, 33.3, 33.3
-        else:
-            win = 50 + (score / 1000) * 50
-            win = max(0, min(100, win))
-            loss = 100 - win
-            draw = max(0, 100 - win - loss)
-
-        return jsonify({
-            "white": round(win, 1),
-            "draw": round(draw, 1),
-            "black": round(loss, 1)
-        })
-    
-    except Exception as e:
-        print("🔥 /ai/eval 오류:", e)
-        try:
-            engine.quit()
-        except Exception as qe:
-            print("⚠️ 엔진 종료 실패:", qe)
-
-        try:
-            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-            print("✅ Stockfish 재시작 완료 (/ai/eval)")
-        except Exception as re:
-            print("❌ Stockfish 재시작 실패 (/ai/eval):", re)
-        
-        return jsonify({"error": str(e)}), 500

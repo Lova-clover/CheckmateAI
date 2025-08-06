@@ -48,10 +48,8 @@ function App() {
     success: number;
     success_rate: number;
     recent: { puzzle_id: string; solved: boolean; time: number; date: string }[];
-    recent_games?: { game_id: string; result: string; moves: number; date: string }[]; 
   }>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
-  const [moveEval, setMoveEval] = useState<null | { white: number; black: number; draw: number }>(null);
 
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
@@ -173,56 +171,19 @@ function App() {
 
 
   const checkGameOver = (gameInstance: Chess) => {
-    const saveGameResult = async (result: 'win' | 'loss' | 'draw') => {
-      if (!userId) return;
-
-      const endTime = Date.now();
-      const timeTaken = startTime ? Math.floor((endTime - startTime) / 1000) : 0;
-
-      const history = game.history({ verbose: true });
-      const uciMoves = history.map(m => m.from + m.to + (m.promotion ?? ''));
-
-      try {
-        await fetch(`${BACKEND_URL}/ai/game/submit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: userId,
-            result,
-            time: timeTaken,
-            moves: uciMoves
-          })
-        });
-        console.log("✅ 게임 기록 저장 완료");
-      } catch (e) {
-        console.error("❌ 게임 기록 저장 실패:", e);
-      }
-    };
-
     if (gameInstance.isCheckmate()) {
       const winner = gameInstance.turn() === 'w' ? '흑' : '백';
       setWinnerMessage(`체크메이트! ${winner} 승리!`);
-      
-      // 기록 저장 호출
-      if (useAI) saveGameResult(winner === '백' ? 'win' : 'loss');
-
-    } else if (gameInstance.isDraw() || gameInstance.isStalemate()) {
+    } else if (gameInstance.isDraw()) {
       setWinnerMessage('무승부입니다.');
-
-      // 무승부도 기록 저장
-      if (useAI) saveGameResult('draw');
-
+    } else if (gameInstance.isStalemate()) {
+      setWinnerMessage('스테일메이트! 무승부입니다.');
     } else if (gameInstance.isGameOver()) {
       setWinnerMessage('게임이 종료되었습니다.');
-
-      // 기타 종료 상태도 처리
-      if (useAI) saveGameResult('draw');
-
     } else {
       setWinnerMessage('');
     }
   };
-
   
   function fetchWithTimeout(resource: RequestInfo, options: any = {}, timeout = 10000): Promise<Response> {
     return new Promise((resolve, reject) => {
@@ -241,47 +202,22 @@ function App() {
 
   const playAIMove = async () => {
     try {
-      const prevFen = game.fen();  // ✅ AI 수를 두기 전 상태 저장
-
       const res = await fetchWithTimeout(`${BACKEND_URL}/ai/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fen: prevFen, level: aiLevel }),  // ⬅️ 여기에도 prevFen
-      }, 5000);
+        body: JSON.stringify({ fen: game.fen(), level: aiLevel }),
+      }, 5000);  // ⏱ 10초 제한
 
       const data = await res.json();
       if (!data.move) throw new Error("AI 응답 없음");
 
       const from = data.move.slice(0, 2);
       const to = data.move.slice(2, 4);
-
       const move = game.move({ from, to, promotion: 'q' });
       if (move) {
         setPosition(game.fen());
         updateMovePairs(game.history({ verbose: true }));
         checkGameOver(game);
-
-        // ✅ AI가 둔 수에 대해 move eval 요청
-        try {
-          const evalRes = await fetch(`${BACKEND_URL}/ai/eval`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              fen: prevFen,
-              move: from + to
-            })
-          });
-
-          if (evalRes.ok) {
-            const evalData = await evalRes.json();
-            setMoveEval(evalData);
-          } else {
-            const errText = await evalRes.text();
-            console.warn("❌ AI move eval 에러 응답:", errText);
-          }
-        } catch (e) {
-          console.warn("AI move eval 실패:", e);
-        }
       }
     } catch (error) {
       console.error("❌ AI 호출 실패:", error);
@@ -383,6 +319,7 @@ function App() {
       return;
     }
 
+
     const piece = game.get(sourceSquare);
     if (!piece || piece.color !== game.turn()) return;
 
@@ -402,46 +339,24 @@ function App() {
         return;
       }
 
-      const prevFen = game.fen(); // ✅ 수 두기 전 상태 저장
+      const move = game.move(matchedMove);
 
-      const move = game.move(matchedMove); // ✅ 수는 한 번만 둔다
-      if (!move) return;
+      if (move === null) {
+        setPosition(game.fen());
+        return;
+      }
 
       setPosition(game.fen());
       updateMovePairs(game.history({ verbose: true }));
       checkGameOver(game);
-
-      // 🔍 move 분석 요청
-      try {
-        const evalRes = await fetch(`${BACKEND_URL}/ai/eval`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fen: prevFen,
-            move: matchedMove.from + matchedMove.to,
-          }),
-        });
-
-        if (evalRes.ok) {
-          const evalData = await evalRes.json();
-          setMoveEval(evalData);
-        } else {
-          const errText = await evalRes.text();
-          console.warn("❌ move eval 에러 응답:", errText);
-        }
-      } catch (e) {
-        console.warn("move eval 실패:", e);
-      }
-
       if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
         setTimeout(() => {
           playAIMove();
         }, 300);
       }
-
-    } catch (e) {
-      console.warn("잘못된 수입니다:", e);
-      setPosition(game.fen());
+    } catch (error) {
+      console.warn('잘못된 수입니다:', error);
+      setPosition(game.fen()); // 원래 위치로 복원
     }
   };
 
@@ -506,8 +421,16 @@ function App() {
     setPosition(newGame.fen());
     setMovePairs([]);
     setWinnerMessage('');
-    setStartTime(Date.now());
   };
+
+  useEffect(() => {
+    if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
+      const timer = setTimeout(() => {
+        playAIMove();
+      }, 300);
+      return () => clearTimeout(timer); // cleanup
+    }
+  }, [game.fen(), useAI, puzzleActive]); 
 
   const fetchUserStats = async () => {
     if (!userId) return;
@@ -531,32 +454,6 @@ function App() {
             🏠 메인페이지로 돌아가기
           </button>
         </div>
-
-        {Array.isArray(userStats.recent_games) && userStats.recent_games.length > 0 && (
-          <>
-            <h5 className="mt-4">🤖 최근 AI 대국 기록</h5>
-            <table className="table table-bordered">
-              <thead>
-                <tr>
-                  <th>게임 ID</th>
-                  <th>결과</th>
-                  <th>총 수</th>
-                  <th>날짜</th>
-                </tr>
-              </thead>
-              <tbody>
-                {userStats.recent_games.map((g, idx) => (
-                  <tr key={idx}>
-                    <td>{g.game_id}</td>
-                    <td>{g.result}</td>
-                    <td>{g.moves} 수</td>
-                    <td>{new Date(g.date).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
 
         <p><strong>현재 점수:</strong> {userStats.score}</p>
         <p><strong>전체 시도:</strong> {userStats.total}회</p>
@@ -821,18 +718,6 @@ function App() {
             transitionDuration={200}
           />
         </div>
-
-        {moveEval && (
-          <div style={{ textAlign: 'center', marginTop: 10 }}>
-            <div style={{ fontWeight: 'bold' }}>이 수의 예상 결과:</div>
-            <div style={{ width: '80%', margin: '8px auto', height: 16, display: 'flex', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ width: `${moveEval.white}%`, background: '#ffffff' }} title={`백: ${moveEval.white}%`} />
-              <div style={{ width: `${moveEval.draw}%`, background: '#a0a0a0' }} title={`무승부: ${moveEval.draw}%`} />
-              <div style={{ width: `${moveEval.black}%`, background: '#000000' }} title={`흑: ${moveEval.black}%`} />
-            </div>
-          </div>
-        )}
-
 
         <div style={{ minWidth: 160, maxHeight: boardWidth, overflowY: 'auto', background: '#fffbe6', padding: 12, borderRadius: 8, boxShadow: '0 0 8px rgba(0,0,0,0.1)' }}>
           <h4>수순</h4>
