@@ -358,7 +358,6 @@ function App() {
       return;
     }
 
-
     const piece = game.get(sourceSquare);
     if (!piece || piece.color !== game.turn()) return;
 
@@ -378,35 +377,33 @@ function App() {
         return;
       }
 
-      const move = game.move(matchedMove);
+      const prevFen = game.fen(); // ✅ 수 두기 전 상태 저장
 
-      if (move === null) {
-        setPosition(game.fen());
-        return;
-      }
+      const move = game.move(matchedMove); // ✅ 수는 한 번만 둔다
+      if (!move) return;
 
       setPosition(game.fen());
       updateMovePairs(game.history({ verbose: true }));
       checkGameOver(game);
 
+      // 🔍 move 분석 요청
       try {
         const evalRes = await fetch(`${BACKEND_URL}/ai/eval`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            fen: game.fen(),
-            move: matchedMove.from + matchedMove.to
-          })
+            fen: prevFen,
+            move: matchedMove.from + matchedMove.to,
+          }),
         });
 
-        if (!evalRes.ok) {
+        if (evalRes.ok) {
+          const evalData = await evalRes.json();
+          setMoveEval(evalData);
+        } else {
           const errText = await evalRes.text();
           console.warn("❌ move eval 에러 응답:", errText);
-          return;
         }
-
-        const evalData = await evalRes.json();
-        setMoveEval(evalData);
       } catch (e) {
         console.warn("move eval 실패:", e);
       }
@@ -416,9 +413,10 @@ function App() {
           playAIMove();
         }, 300);
       }
-    } catch (error) {
-      console.warn('잘못된 수입니다:', error);
-      setPosition(game.fen()); // 원래 위치로 복원
+
+    } catch (e) {
+      console.warn("잘못된 수입니다:", e);
+      setPosition(game.fen());
     }
   };
 
