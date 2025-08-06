@@ -394,10 +394,17 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            fen: game.fen(), // 수를 둔 후의 FEN
+            fen: game.fen(),
             move: matchedMove.from + matchedMove.to
           })
         });
+
+        if (!evalRes.ok) {
+          const errText = await evalRes.text();
+          console.warn("❌ move eval 에러 응답:", errText);
+          return;
+        }
+
         const evalData = await evalRes.json();
         setMoveEval(evalData);
       } catch (e) {
@@ -501,7 +508,7 @@ function App() {
           </button>
         </div>
 
-        {userStats.recent_games && (
+        {Array.isArray(userStats.recent_games) && userStats.recent_games.length > 0 && (
           <>
             <h5 className="mt-4">🤖 최근 AI 대국 기록</h5>
             <table className="table table-bordered">

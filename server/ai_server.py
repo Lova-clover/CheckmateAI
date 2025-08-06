@@ -187,26 +187,37 @@ def user_stats():
     user_doc = user_ref.get()
     score = user_doc.to_dict()["score"] if user_doc.exists else 1200
 
-    # 전체 기록 가져와서 전체 통계 계산
+    # 퍼즐 통계
     all_records = list(user_ref.collection("records").stream())
     total = len(all_records)
     success = sum(1 for r in all_records if r.to_dict().get("solved"))
     rate = round(success / total * 100, 1) if total > 0 else 0.0
 
-    # 최근 5개만 별도로 가져오기
+    # 최근 퍼즐
     records_ref = user_ref.collection("records") \
         .order_by("timestamp", direction=firestore.Query.DESCENDING) \
         .limit(5)
     recent_records = records_ref.stream()
+    recent = [{
+        "puzzle_id": r.to_dict().get("puzzle_id"),
+        "solved": r.to_dict().get("solved"),
+        "time": r.to_dict().get("time"),
+        "date": r.to_dict().get("timestamp").isoformat() if r.to_dict().get("timestamp") else None
+    } for r in recent_records]
 
-    recent = []
-    for r in recent_records:
-        data = r.to_dict()
-        recent.append({
-            "puzzle_id": data.get("puzzle_id"),
-            "solved": data.get("solved"),
-            "time": data.get("time"),
-            "date": data.get("timestamp").isoformat() if data.get("timestamp") else None
+    # 🔧 최근 AI 대국 추가
+    game_ref = user_ref.collection("game_records") \
+        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+        .limit(5)
+    recent_games = game_ref.stream()
+    game_list = []
+    for g in recent_games:
+        d = g.to_dict()
+        game_list.append({
+            "game_id": g.id,
+            "result": d.get("result"),
+            "moves": len(d.get("moves", [])),
+            "date": d.get("timestamp").isoformat() if d.get("timestamp") else None
         })
 
     return jsonify({
@@ -214,7 +225,8 @@ def user_stats():
         "total": total,
         "success": success,
         "success_rate": rate,
-        "recent": recent
+        "recent": recent,
+        "recent_games": game_list  # ✅ 추가됨
     })
 
 @app.route("/ai/game/submit", methods=["POST"])
@@ -288,29 +300,31 @@ def get_move_winrate():
 
 @app.route("/ai/eval", methods=["POST"])
 def evaluate_move():
-    data = request.get_json()
-    fen = data.get("fen")
-    move = data.get("move")  # UCI 형식
+    try:
+        data = request.get_json()
+        fen = data.get("fen")
+        move = data.get("move")  # UCI 형식
 
-    board = chess.Board(fen)
-    board.push_uci(move)
+        board = chess.Board(fen)
+        board.push_uci(move)
 
-    info = engine.analyse(board, chess.engine.Limit(depth=12))
+        info = engine.analyse(board, chess.engine.Limit(depth=12))
+        score = info["score"].white().score(mate_score=10000)
 
-    score = info["score"].white().score(mate_score=10000)
+        if score is None:
+            win, draw, loss = 33.3, 33.3, 33.3
+        else:
+            win = 50 + (score / 1000) * 50
+            win = max(0, min(100, win))
+            loss = 100 - win
+            draw = max(0, 100 - win - loss)
 
-    # 점수 → 확률 변환 (softmax 유사)
-    if score is None:
-        win, draw, loss = 33.3, 33.3, 33.3
-    else:
-        # 점수를 확률로 변환 (1000점 차이 = 90% 수준으로 가정)
-        win = 50 + (score / 1000) * 50
-        win = max(0, min(100, win))
-        loss = 100 - win
-        draw = max(0, 100 - win - loss)
-
-    return jsonify({
-        "white": round(win, 1),
-        "draw": round(draw, 1),
-        "black": round(loss, 1)
-    })
+        return jsonify({
+            "white": round(win, 1),
+            "draw": round(draw, 1),
+            "black": round(loss, 1)
+        })
+    
+    except Exception as e:
+        print("🔥 /ai/eval 오류:", e)
+        return jsonify({"error": str(e)}), 500
