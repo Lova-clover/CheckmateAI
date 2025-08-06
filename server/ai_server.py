@@ -103,9 +103,11 @@ def get_puzzle():
         "score": score
     })
     
-@app.route('/ai/move', methods=['POST', 'OPTIONS'])  # ✅ OPTIONS 추가
+@app.route('/ai/move', methods=['POST', 'OPTIONS'])
 def ai_move():
-    if request.method == 'OPTIONS':  # ✅ Preflight 처리
+    global engine  # 🔑 전역 엔진 재할당을 위해 필요
+
+    if request.method == 'OPTIONS':
         return '', 200
 
     data = request.get_json()
@@ -119,31 +121,51 @@ def ai_move():
 
     try:
         if level == 'easy':
-            if random.random() < 0.9:
+            try:
+                # 낮은 depth, 낮은 time, 더 많은 multipv
+                info = engine.analyse(board, chess.engine.Limit(depth=1, time=0.2), multipv=10, timeout=1.0)
+
+                # 아예 4번째 수 이후만 추출 → 4등~10등 중 랜덤
+                bad_candidates = [entry["pv"][0] for entry in info[3:] if "pv" in entry]
+                
+                if bad_candidates:
+                    move = random.choice(bad_candidates)
+                else:
+                    move = random.choice(list(board.legal_moves))  # fallback
+            except Exception as e:
+                print("⚠️ easy 모드 fallback:", e)
                 move = random.choice(list(board.legal_moves))
-            else:
-                result = engine.play(board, chess.engine.Limit(depth=1, time=0.3))
-                move = result.move
         elif level == 'medium':
             if random.random() < 0.6:
-                result = engine.play(board, chess.engine.Limit(depth=2, time=0.5))
+                result = engine.play(board, chess.engine.Limit(depth=2, time=0.5), timeout=2.0)
                 move = result.move
             else:
-                info = engine.analyse(board, chess.engine.Limit(depth=2, time=1.0), multipv=3)
+                info = engine.analyse(board, chess.engine.Limit(depth=2, time=1.0), multipv=3, timeout=3.0)
                 candidates = [entry["pv"][0] for entry in info if "pv" in entry]
-                if candidates:
-                    move = random.choice(candidates)
-                else:
-                    result = engine.play(board, chess.engine.Limit(depth=2))
-                    move = result.move
+                move = random.choice(candidates) if candidates else engine.play(board, chess.engine.Limit(depth=2), timeout=2.0).move
         else:
-            result = engine.play(board, chess.engine.Limit(depth=4))
+            result = engine.play(board, chess.engine.Limit(depth=4), timeout=3.0)
             move = result.move
 
         return jsonify({'move': move.uci()})
+
     except Exception as e:
-        print("🔥 AI 서버 오류:", e)
-        return jsonify({'error': str(e)}), 500
+        print("🔥 Stockfish 오류 발생:", e)
+
+        # 🔁 엔진 재시작
+        try:
+            engine.quit()
+        except Exception as qe:
+            print("⚠️ 엔진 종료 실패:", qe)
+
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+            print("✅ Stockfish 재시작 완료")
+        except Exception as re:
+            print("❌ Stockfish 재시작 실패:", re)
+            return jsonify({'error': 'Stockfish 재시작 실패'}), 500
+
+        return jsonify({'error': 'Stockfish 오류로 인해 AI가 재시작되었습니다.'}), 500
 
 @app.route("/ai/puzzle/submit", methods=["POST"])
 def submit_result():
