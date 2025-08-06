@@ -217,3 +217,86 @@ def user_stats():
         "recent": recent
     })
 
+@app.route("/ai/game/submit", methods=["POST"])
+def submit_game_result():
+    data = request.get_json()
+    user_id = data["user_id"]
+    result = data["result"]  # 'win', 'loss', 'draw'
+    time_taken = data.get("time", 0)
+    moves = data.get("moves", [])  # UCI 리스트
+
+    user_ref = firestore_db.collection("users").document(user_id)
+    user_ref.collection("game_records").add({
+        "result": result,
+        "time": time_taken,
+        "moves": moves,
+        "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
+    return jsonify({"message": "Game record saved"})
+
+@app.route("/ai/game/stats", methods=["GET"])
+def get_game_stats():
+    user_id = request.args.get("user_id")
+    user_ref = firestore_db.collection("users").document(user_id)
+
+    records = user_ref.collection("game_records") \
+                      .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+                      .limit(5).stream()
+
+    recent = []
+    total = 0
+    win = 0
+    for r in records:
+        data = r.to_dict()
+        total += 1
+        if data["result"] == "win":
+            win += 1
+        recent.append({
+            "result": data["result"],
+            "time": data["time"],
+            "date": data["timestamp"].isoformat() if data.get("timestamp") else None
+        })
+
+    return jsonify({
+        "total": total,
+        "win": win,
+        "win_rate": round(win / total * 100, 1) if total > 0 else 0.0,
+        "recent": recent
+    })
+
+@app.route("/ai/move/winrate", methods=["GET"])
+def get_move_winrate():
+    user_id = request.args.get("user_id")
+    user_ref = firestore_db.collection("users").document(user_id)
+    records = user_ref.collection("game_records").stream()
+
+    winrate_by_move = {}
+    for r in records:
+        data = r.to_dict()
+        result = data["result"]
+        moves = data.get("moves", [])
+
+        for move in moves:
+            if move not in winrate_by_move:
+                winrate_by_move[move] = {"total": 0, "win": 0}
+            winrate_by_move[move]["total"] += 1
+            if result == "win":
+                winrate_by_move[move]["win"] += 1
+
+    return jsonify(winrate_by_move)
+
+@app.route("/ai/eval", methods=["POST"])
+def evaluate_move():
+    data = request.get_json()
+    fen = data.get("fen")
+    move = data.get("move")  # UCI 형식
+
+    board = chess.Board(fen)
+    board.push_uci(move)
+
+    # Stockfish 분석 (depth=12 기준)
+    info = engine.analyse(board, chess.engine.Limit(depth=12))
+
+    score = info["score"].white().score(mate_score=10000)  # 백 기준 평가
+    return jsonify({"white": score})

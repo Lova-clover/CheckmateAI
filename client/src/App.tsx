@@ -48,8 +48,10 @@ function App() {
     success: number;
     success_rate: number;
     recent: { puzzle_id: string; solved: boolean; time: number; date: string }[];
+    recent_games?: { game_id: string; result: string; moves: number; date: string }[]; 
   }>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
+  const [moveEval, setMoveEval] = useState<null | { white: number; black: number; draw: number }>(null);
 
   const BACKEND_URL =
     process.env.NODE_ENV === 'production'
@@ -349,6 +351,22 @@ function App() {
       setPosition(game.fen());
       updateMovePairs(game.history({ verbose: true }));
       checkGameOver(game);
+
+      try {
+        const evalRes = await fetch(`${BACKEND_URL}/ai/eval`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fen: game.fen(), // 수를 둔 후의 FEN
+            move: matchedMove.from + matchedMove.to
+          })
+        });
+        const evalData = await evalRes.json();
+        setMoveEval(evalData);
+      } catch (e) {
+        console.warn("move eval 실패:", e);
+      }
+
       if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
         setTimeout(() => {
           playAIMove();
@@ -454,6 +472,32 @@ function App() {
             🏠 메인페이지로 돌아가기
           </button>
         </div>
+
+        {userStats.recent_games && (
+          <>
+            <h5 className="mt-4">🤖 최근 AI 대국 기록</h5>
+            <table className="table table-bordered">
+              <thead>
+                <tr>
+                  <th>게임 ID</th>
+                  <th>결과</th>
+                  <th>총 수</th>
+                  <th>날짜</th>
+                </tr>
+              </thead>
+              <tbody>
+                {userStats.recent_games.map((g, idx) => (
+                  <tr key={idx}>
+                    <td>{g.game_id}</td>
+                    <td>{g.result}</td>
+                    <td>{g.moves} 수</td>
+                    <td>{new Date(g.date).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
 
         <p><strong>현재 점수:</strong> {userStats.score}</p>
         <p><strong>전체 시도:</strong> {userStats.total}회</p>
@@ -718,6 +762,18 @@ function App() {
             transitionDuration={200}
           />
         </div>
+
+        {moveEval && (
+          <div style={{ textAlign: 'center', marginTop: 10 }}>
+            <div style={{ fontWeight: 'bold' }}>이 수의 예상 결과:</div>
+            <div style={{ width: '80%', margin: '8px auto', height: 16, display: 'flex', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ width: `${moveEval.white}%`, background: '#ffffff' }} title={`백: ${moveEval.white}%`} />
+              <div style={{ width: `${moveEval.draw}%`, background: '#a0a0a0' }} title={`무승부: ${moveEval.draw}%`} />
+              <div style={{ width: `${moveEval.black}%`, background: '#000000' }} title={`흑: ${moveEval.black}%`} />
+            </div>
+          </div>
+        )}
+
 
         <div style={{ minWidth: 160, maxHeight: boardWidth, overflowY: 'auto', background: '#fffbe6', padding: 12, borderRadius: 8, boxShadow: '0 0 8px rgba(0,0,0,0.1)' }}>
           <h4>수순</h4>
