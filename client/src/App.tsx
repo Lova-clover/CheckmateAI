@@ -478,15 +478,6 @@ function App() {
     setWinnerMessage('');
   };
 
-  useEffect(() => {
-    if (!puzzleActive && useAI && game.turn() === 'b' && !game.isGameOver()) {
-      const timer = setTimeout(() => {
-        playAIMove();
-      }, 300);
-      return () => clearTimeout(timer); // cleanup
-    }
-  }, [game.fen(), useAI, puzzleActive]); 
-
   const fetchUserStats = async () => {
     if (!userId) return;
     try {
