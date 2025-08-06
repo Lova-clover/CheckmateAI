@@ -221,7 +221,6 @@ function App() {
       }
     } catch (error) {
       console.error("❌ AI 호출 실패:", error);
-      alert("AI 응답에 실패했습니다. 네트워크나 서버 상태를 확인해주세요.");
     }
   };
 
