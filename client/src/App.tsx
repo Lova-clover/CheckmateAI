@@ -241,22 +241,47 @@ function App() {
 
   const playAIMove = async () => {
     try {
+      const prevFen = game.fen();  // ✅ AI 수를 두기 전 상태 저장
+
       const res = await fetchWithTimeout(`${BACKEND_URL}/ai/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fen: game.fen(), level: aiLevel }),
-      }, 5000);  // ⏱ 10초 제한
+        body: JSON.stringify({ fen: prevFen, level: aiLevel }),  // ⬅️ 여기에도 prevFen
+      }, 5000);
 
       const data = await res.json();
       if (!data.move) throw new Error("AI 응답 없음");
 
       const from = data.move.slice(0, 2);
       const to = data.move.slice(2, 4);
+
       const move = game.move({ from, to, promotion: 'q' });
       if (move) {
         setPosition(game.fen());
         updateMovePairs(game.history({ verbose: true }));
         checkGameOver(game);
+
+        // ✅ AI가 둔 수에 대해 move eval 요청
+        try {
+          const evalRes = await fetch(`${BACKEND_URL}/ai/eval`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fen: prevFen,
+              move: from + to
+            })
+          });
+
+          if (evalRes.ok) {
+            const evalData = await evalRes.json();
+            setMoveEval(evalData);
+          } else {
+            const errText = await evalRes.text();
+            console.warn("❌ AI move eval 에러 응답:", errText);
+          }
+        } catch (e) {
+          console.warn("AI move eval 실패:", e);
+        }
       }
     } catch (error) {
       console.error("❌ AI 호출 실패:", error);
@@ -481,6 +506,7 @@ function App() {
     setPosition(newGame.fen());
     setMovePairs([]);
     setWinnerMessage('');
+    setStartTime(Date.now());
   };
 
   const fetchUserStats = async () => {
