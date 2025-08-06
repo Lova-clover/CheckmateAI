@@ -187,25 +187,27 @@ def user_stats():
     user_doc = user_ref.get()
     score = user_doc.to_dict()["score"] if user_doc.exists else 1200
 
-    records_ref = user_ref.collection("records").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(5)
+    # 전체 기록 가져와서 전체 통계 계산
+    all_records = list(user_ref.collection("records").stream())
+    total = len(all_records)
+    success = sum(1 for r in all_records if r.to_dict().get("solved"))
+    rate = round(success / total * 100, 1) if total > 0 else 0.0
+
+    # 최근 5개만 별도로 가져오기
+    records_ref = user_ref.collection("records") \
+        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+        .limit(5)
     recent_records = records_ref.stream()
 
-    total = 0
-    success = 0
     recent = []
     for r in recent_records:
         data = r.to_dict()
-        total += 1
-        if data.get("solved"):
-            success += 1
         recent.append({
             "puzzle_id": data.get("puzzle_id"),
             "solved": data.get("solved"),
             "time": data.get("time"),
             "date": data.get("timestamp").isoformat() if data.get("timestamp") else None
         })
-
-    rate = round(success / total * 100, 1) if total > 0 else 0.0
 
     return jsonify({
         "score": score,
@@ -214,3 +216,4 @@ def user_stats():
         "success_rate": rate,
         "recent": recent
     })
+
