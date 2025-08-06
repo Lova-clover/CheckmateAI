@@ -295,8 +295,22 @@ def evaluate_move():
     board = chess.Board(fen)
     board.push_uci(move)
 
-    # Stockfish 분석 (depth=12 기준)
     info = engine.analyse(board, chess.engine.Limit(depth=12))
 
-    score = info["score"].white().score(mate_score=10000)  # 백 기준 평가
-    return jsonify({"white": score})
+    score = info["score"].white().score(mate_score=10000)
+
+    # 점수 → 확률 변환 (softmax 유사)
+    if score is None:
+        win, draw, loss = 33.3, 33.3, 33.3
+    else:
+        # 점수를 확률로 변환 (1000점 차이 = 90% 수준으로 가정)
+        win = 50 + (score / 1000) * 50
+        win = max(0, min(100, win))
+        loss = 100 - win
+        draw = max(0, 100 - win - loss)
+
+    return jsonify({
+        "white": round(win, 1),
+        "draw": round(draw, 1),
+        "black": round(loss, 1)
+    })
