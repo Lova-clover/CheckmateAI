@@ -23,13 +23,13 @@ firebase_admin.initialize_app(cred)
 firestore_db = firestore.client()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://checkmateai-app.vercel.app"}}, supports_credentials=True)
+CORS(app, origins=["https://checkmateai-app.vercel.app"], supports_credentials=True)
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = 'https://checkmateai-app.vercel.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers.setdefault('Access-Control-Allow-Origin', 'https://checkmateai-app.vercel.app')
+    response.headers.setdefault('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.setdefault('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
@@ -325,10 +325,15 @@ def evaluate_move():
     try:
         data = request.get_json()
         fen = data.get("fen")
-        move = data.get("move")  # UCI 형식
+        move = data.get("move")  # UCI 형식: 'e2e4'
 
         board = chess.Board(fen)
-        board.push_uci(move)
+        move_obj = chess.Move.from_uci(move)
+
+        if not board.is_legal(move_obj):
+            return jsonify({"error": f"illegal move: '{move}' in {fen}"}), 400
+
+        board.push(move_obj)
 
         info = engine.analyse(board, chess.engine.Limit(depth=12))
         score = info["score"].white().score(mate_score=10000)
@@ -349,4 +354,15 @@ def evaluate_move():
     
     except Exception as e:
         print("🔥 /ai/eval 오류:", e)
+        try:
+            engine.quit()
+        except Exception as qe:
+            print("⚠️ 엔진 종료 실패:", qe)
+
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+            print("✅ Stockfish 재시작 완료 (/ai/eval)")
+        except Exception as re:
+            print("❌ Stockfish 재시작 실패 (/ai/eval):", re)
+        
         return jsonify({"error": str(e)}), 500
