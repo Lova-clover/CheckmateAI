@@ -43,6 +43,8 @@ if not os.path.exists(DB_PATH):
         for chunk in r.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
+   
+engine = None   
     
 STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
 engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
