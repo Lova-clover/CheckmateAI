@@ -173,19 +173,56 @@ function App() {
 
 
   const checkGameOver = (gameInstance: Chess) => {
+    const saveGameResult = async (result: 'win' | 'loss' | 'draw') => {
+      if (!userId) return;
+
+      const endTime = Date.now();
+      const timeTaken = startTime ? Math.floor((endTime - startTime) / 1000) : 0;
+
+      const history = game.history({ verbose: true });
+      const uciMoves = history.map(m => m.from + m.to + (m.promotion ?? ''));
+
+      try {
+        await fetch(`${BACKEND_URL}/ai/game/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            result,
+            time: timeTaken,
+            moves: uciMoves
+          })
+        });
+        console.log("✅ 게임 기록 저장 완료");
+      } catch (e) {
+        console.error("❌ 게임 기록 저장 실패:", e);
+      }
+    };
+
     if (gameInstance.isCheckmate()) {
       const winner = gameInstance.turn() === 'w' ? '흑' : '백';
       setWinnerMessage(`체크메이트! ${winner} 승리!`);
-    } else if (gameInstance.isDraw()) {
+      
+      // 기록 저장 호출
+      if (useAI) saveGameResult(winner === '백' ? 'win' : 'loss');
+
+    } else if (gameInstance.isDraw() || gameInstance.isStalemate()) {
       setWinnerMessage('무승부입니다.');
-    } else if (gameInstance.isStalemate()) {
-      setWinnerMessage('스테일메이트! 무승부입니다.');
+
+      // 무승부도 기록 저장
+      if (useAI) saveGameResult('draw');
+
     } else if (gameInstance.isGameOver()) {
       setWinnerMessage('게임이 종료되었습니다.');
+
+      // 기타 종료 상태도 처리
+      if (useAI) saveGameResult('draw');
+
     } else {
       setWinnerMessage('');
     }
   };
+
   
   function fetchWithTimeout(resource: RequestInfo, options: any = {}, timeout = 10000): Promise<Response> {
     return new Promise((resolve, reject) => {
