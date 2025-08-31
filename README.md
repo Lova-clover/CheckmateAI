@@ -80,18 +80,20 @@
 
 ## 📂 프로젝트 구조 (마이그레이션 이후)
 
+```text
 CheckmateAI/
-├── app.py # Streamlit 단일 앱 (AI/퍼즐/분석/트레이너)
-├── engine/
-│ └── stockfish # (권장) 리눅스 바이너리 포함, +x 권한 필수
-├── puzzles.db # SQLite 퍼즐 DB (rating 인덱스 권장)
-├── requirements.txt
-├── packages.txt # (선택) apt 패키지 설치: stockfish
-├── .streamlit/
-│ └── config.toml # (선택) UI/성능 설정
-└── legacy/ # (선택) 기존 React/Flask 소스 보관
-├── client/ # React 프런트
-└── server/ # Flask 백엔드
+├─ app.py                  # Streamlit 단일 앱 (AI/퍼즐/분석/트레이너)
+├─ engine/
+│  └─ stockfish            # (권장) 리눅스 바이너리 포함, +x 권한 필수
+├─ puzzles.db              # SQLite 퍼즐 DB (rating 인덱스 권장)
+├─ requirements.txt
+├─ packages.txt            # (선택) apt 패키지 설치: stockfish
+├─ .streamlit/
+│  └─ config.toml          # (선택) UI/성능 설정
+└─ legacy/                 # (선택) 기존 React/Flask 소스 보관
+   ├─ client/              # React 프런트
+   └─ server/              # Flask 백엔드
+```
 
 📈 성능/안정성 메모
 
