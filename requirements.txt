@@ -1,6 +1,6 @@
 streamlit==1.37.0
-python-chess>=1.999
-streamlit-chessboard>=0.1.1
+chess>=1.11
+stchess==0.0.1
 pandas>=2.0
 numpy>=1.23
 stockfish
