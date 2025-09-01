@@ -4,11 +4,46 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Dict, Any, List, Tuple, Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import chess
 import chess.engine
-from streamlit_chessboard import st_chessboard
+import chess.svg  # for SVG fallback board
+
+# -----------------------------------------------------------------------------
+# Optional interactive board: stchess (PyPI). Fallback to static SVG if missing.
+# -----------------------------------------------------------------------------
+try:
+    from stchess import board as _st_board  # returns FEN string after user moves
+    _HAS_STCHESS = True
+except Exception:
+    _HAS_STCHESS = False
+
+def st_chessboard(initial_fen: str, key: str, theme: str = "green",
+                  allow_moves: bool = True, height: int = 520) -> str:
+    """
+    Drop-in replacement for previous `streamlit_chessboard.st_chessboard`.
+    If `stchess` is available, show interactive board and return updated FEN.
+    Otherwise render a static SVG board and return the original FEN.
+    """
+    if _HAS_STCHESS:
+        # stchess doesn't expose theme/allow_moves toggles,
+        # but returns current FEN after user interaction.
+        return _st_board(fen=initial_fen, key=key, height=height)
+    # Fallback: static SVG (read-only)
+    try:
+        svg = chess.svg.board(chess.Board(initial_fen))
+        components.html(svg, height=height, scrolling=False)
+    except Exception:
+        st.warning("Static board render failed; showing FEN only.")
+        st.code(initial_fen)
+    return initial_fen
+
+# ---------------------------
+# Page config
+# ---------------------------
+st.set_page_config(page_title="CheckmateAI", layout="wide")
 
 # ---------------------------
 # Constants & Config
@@ -33,7 +68,7 @@ def get_engine(path: str = DEFAULT_ENGINE_PATH) -> chess.engine.SimpleEngine:
         candidates.append(path)
     # 2) Repo binary
     candidates.append(os.path.abspath("engine/stockfish"))
-    # 3) System PATH
+    # 3) System PATH (apt install stockfish -> /usr/bin/stockfish)
     which = shutil.which("stockfish")
     if which:
         candidates.append(which)
@@ -44,11 +79,14 @@ def get_engine(path: str = DEFAULT_ENGINE_PATH) -> chess.engine.SimpleEngine:
             chosen = p
             break
     if not chosen:
-        raise FileNotFoundError("Stockfish binary not found. Put it at ./engine/stockfish or set STOCKFISH_PATH, or add 'stockfish' to PATH (packages.txt).")
+        raise FileNotFoundError(
+            "Stockfish binary not found. Put it at ./engine/stockfish or set STOCKFISH_PATH, "
+            "or add 'stockfish' to PATH (packages.txt)."
+        )
 
     # Ensure executable bit (git may drop it on some flows)
     try:
-        st.write("Using engine:", chosen)
+        st.caption(f"Using engine: {chosen}")
         mode = os.stat(chosen).st_mode
         if not (mode & stat.S_IXUSR):
             os.chmod(chosen, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -58,10 +96,7 @@ def get_engine(path: str = DEFAULT_ENGINE_PATH) -> chess.engine.SimpleEngine:
     engine = chess.engine.SimpleEngine.popen_uci(chosen)
     # Cloud-safe config: 1 thread, small hash
     try:
-        engine.configure({
-            "Threads": 1,
-            "Hash": 64,
-        })
+        engine.configure({"Threads": 1, "Hash": 64})
     except Exception:
         pass
     return engine
@@ -74,13 +109,8 @@ def get_db_conn(db_path: str = "puzzles.db"):
         c = conn.cursor()
         c.execute("CREATE TABLE puzzles(puzzle_id TEXT, fen TEXT, moves TEXT, rating INT, themes TEXT)")
         # one toy puzzle (mate in 1)
-        c.execute("INSERT INTO puzzles VALUES(?,?,?,?,?)", (
-            "demo_1",
-            "8/8/8/8/8/8/5K2/6Rk w - - 0 1",
-            "Rg1#",
-            1200,
-            "mateIn1"
-        ))
+        c.execute("INSERT INTO puzzles VALUES(?,?,?,?,?)",
+                  ("demo_1", "8/8/8/8/8/8/5K2/6Rk w - - 0 1", "Rg1#", 1200, "mateIn1"))
         conn.commit()
         return conn
     # Disk DB connection
@@ -103,8 +133,6 @@ def get_puzzle_near_rating(target_elo: int, k: int = 1) -> List[Dict[str, Any]]:
 # ---------------------------
 # Utility: Eval → Win probability
 # ---------------------------
-# Convert centipawn score to win probability for side-to-move (simplified, symmetric logistic)
-
 def cp_to_winprob(cp: Optional[int], is_white_to_move: bool) -> float:
     if cp is None:
         return 0.5
@@ -160,7 +188,8 @@ class EngineWorker:
         self.pool = ThreadPoolExecutor(max_workers=2)
         self.lock = threading.Lock()
 
-    def analyse(self, board: chess.Board, multipv: int = ENGINE_MULTIPV, think_ms: int = ENGINE_MILLIS_PER_MOVE) -> List[chess.engine.InfoDict]:
+    def analyse(self, board: chess.Board, multipv: int = ENGINE_MULTIPV,
+                think_ms: int = ENGINE_MILLIS_PER_MOVE) -> List[chess.engine.InfoDict]:
         limit = chess.engine.Limit(time=max(0.05, think_ms/1000.0))
         with self.lock:
             infos = self.engine.analyse(board, limit=limit, multipv=multipv)
@@ -168,7 +197,8 @@ class EngineWorker:
             infos = [infos]
         return infos
 
-    def analyse_async(self, board: chess.Board, multipv: int = ENGINE_MULTIPV, think_ms: int = ENGINE_MILLIS_PER_MOVE) -> Future:
+    def analyse_async(self, board: chess.Board, multipv: int = ENGINE_MULTIPV,
+                      think_ms: int = ENGINE_MILLIS_PER_MOVE) -> Future:
         return self.pool.submit(self.analyse, board.copy(), multipv, think_ms)
 
     def play(self, board: chess.Board, think_ms: int = ENGINE_MILLIS_PER_MOVE) -> chess.Move:
@@ -251,17 +281,20 @@ st.sidebar.selectbox("AI style preset", list(STYLE_PRESETS.keys()), key="style")
 # ---------------------------
 # Tabs
 # ---------------------------
-TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS, TAB_TRAINER = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis", "🎯 Trainer"])
+TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS, TAB_TRAINER = st.tabs(
+    ["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis", "🎯 Trainer"]
+)
 
 # ---------------------------------
 # Tab 1: Play vs AI
 # ---------------------------------
 with TAB_PLAY:
     st.subheader("Play vs AI (with style presets)")
-    col1, col2 = st.columns([2,1])
+    col1, col2 = st.columns([2, 1])
     with col1:
         board: chess.Board = st.session_state.board
         fen_before = board.fen()
+        # (interactive if stchess exists; static SVG otherwise)
         board_fen = st_chessboard(
             initial_fen=fen_before,
             key="main_board",
@@ -269,23 +302,46 @@ with TAB_PLAY:
             allow_moves=not board.is_game_over(),
             height=520,
         )
-        # If user moved on the board
+        # If user moved on the board (interactive path)
         if board_fen and board_fen != fen_before:
             try:
                 st.session_state.board = chess.Board(board_fen)
             except Exception:
                 pass
 
-        # Buttons
-        bcol1, bcol2, bcol3 = st.columns(3)
+        # Minimal text move input (works also in fallback mode)
+        user_move_typed = st.text_input("Type your move (SAN or UCI), e.g. 'e4' or 'e2e4'", key="play_try")
+        bcol1, bcol2, bcol3, bcol4 = st.columns(4)
         if bcol1.button("⏮️ New game"):
             st.session_state.board = chess.Board()
             st.session_state.history = []
 
-        if bcol2.button("🤖 AI move") and st.session_state.worker:
+        if bcol2.button("👤 Make my move") and user_move_typed:
+            try:
+                try:
+                    mv = st.session_state.board.parse_san(user_move_typed)
+                except Exception:
+                    mv = chess.Move.from_uci(user_move_typed)
+                if mv in st.session_state.board.legal_moves:
+                    san_str = st.session_state.board.san(mv)
+                    st.session_state.board.push(mv)
+                    st.session_state.history.append({
+                        "ply": len(st.session_state.history)+1,
+                        "san": san_str,
+                        "eval_cp": 0,
+                        "winprob": 0.5,
+                    })
+                else:
+                    st.warning("Illegal move.")
+            except Exception as e:
+                st.warning(f"Could not parse move: {e}")
+
+        if bcol3.button("🤖 AI move") and st.session_state.worker:
             if not st.session_state.board.is_game_over():
                 # Analyse, pick a move
-                infos = st.session_state.worker.analyse(st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms)
+                infos = st.session_state.worker.analyse(
+                    st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms
+                )
                 mv = pick_styled_move(st.session_state.board, infos, st.session_state.style)
                 # Compute SAN BEFORE pushing
                 san_str = st.session_state.board.san(mv)
@@ -302,7 +358,7 @@ with TAB_PLAY:
                     "winprob": cp_to_winprob(cp, st.session_state.board.turn),
                 })
 
-        if bcol3.button("⬅️ Undo"):
+        if bcol4.button("⬅️ Undo"):
             if len(st.session_state.board.move_stack) > 0:
                 st.session_state.board.pop()
                 if st.session_state.history:
@@ -315,7 +371,9 @@ with TAB_PLAY:
     with col2:
         st.markdown("**Engine candidates (MultiPV):**")
         if st.session_state.worker:
-            infos = st.session_state.worker.analyse(st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms)
+            infos = st.session_state.worker.analyse(
+                st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms
+            )
             for i, info in enumerate(infos, 1):
                 pv = info.get("pv") or []
                 line = pv_to_san_line(st.session_state.board, pv, 6) if pv else ""
@@ -425,7 +483,7 @@ with TAB_TRAINER:
     st.caption("Tip: your puzzle difficulty auto-tracks your session ELO. Solve streaks push it up; misses pull it down.")
 
 # ---------------------------
-# Footer & Cleanup
+# Footer
 # ---------------------------
 st.divider()
-st.caption("💡 Performance: Engine & DB are cached per session. Avoids flaky server sessions and long waits. If you see engine timeouts, reduce think time or Threads.")
+st.caption("💡 Performance: Engine & DB are cached per session. If you see engine timeouts, reduce think time or Threads.")
