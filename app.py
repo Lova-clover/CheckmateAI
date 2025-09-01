@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, sqlite3, math, threading, stat, shutil
+import os, sys, sqlite3, math, threading, stat, shutil
 from typing import Dict, Any, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,7 +12,8 @@ import chess, chess.engine, chess.svg
 st.set_page_config(page_title="CheckmateAI", layout="wide")
 st.markdown("""
 <style>
-.block-container { padding-bottom: 6rem; } /* 하단 여백으로 '아래 짤림' 방지 */
+/* 하단 여백을 넉넉히 두어 '아래가 짤림' 방지 */
+.block-container { padding-bottom: 10rem; }
 div[data-testid="stSidebar"] { min-width: 320px; }
 </style>
 """, unsafe_allow_html=True)
@@ -24,10 +25,10 @@ try:
 except Exception:
     _HAS_STCHESS = False
 
-def st_chessboard(initial_fen: str, key: str, height: int = 420, allow_moves: bool = True) -> str:
+def st_chessboard(initial_fen: str, key: str, height: int = 380, allow_moves: bool = True) -> str:
     """stchess가 있으면 드래그 가능 보드, 없으면 읽기전용 SVG."""
     if _HAS_STCHESS:
-        # stchess 버전마다 인자가 조금씩 달라서 순차 시도
+        # stchess 버전마다 인자 차이를 흡수
         try:
             return _st_board(fen=initial_fen, key=key, height=height, interactive=allow_moves)
         except TypeError:
@@ -46,14 +47,19 @@ def st_chessboard(initial_fen: str, key: str, height: int = 420, allow_moves: bo
 
 # =============== Engine candidates & helpers ===============
 def _engine_candidates() -> List[str]:
-    return [
-        os.environ.get("STOCKFISH_PATH") or "",                         # 1) ENV override
-        "/usr/bin/stockfish",                                           # 2) OS package (packages.txt)
-        shutil.which("stockfish") or "",                                # 3) PATH
-        os.path.abspath("server/stockfish/stockfish-windows-x86-64-avx2.exe"),# 4) repo binary 
-        os.path.abspath("server/stockfish/stockfish"),                  #    alt name
-        os.path.abspath("engine/stockfish"),                            # 5) legacy path
+    """OS별로 맞는 후보만 리턴."""
+    cands = [
+        os.environ.get("STOCKFISH_PATH") or "",  # 1) ENV override
+        "/usr/bin/stockfish",                    # 2) OS package (packages.txt)
+        shutil.which("stockfish") or "",         # 3) PATH
+        # 4) repo binaries (Linux 빌드만; Windows exe는 아래에서 조건부 추가)
+        os.path.abspath("server/stockfish/stockfish-linux-x86-64-avx2"),
+        os.path.abspath("server/stockfish/stockfish"),
+        os.path.abspath("engine/stockfish"),
     ]
+    if os.name == "nt":  # ✅ Windows 전용 exe는 윈도우에서만 후보에 포함
+        cands.insert(1, os.path.abspath("server/stockfish/stockfish-windows-x86-64-avx2.exe"))
+    return [c for c in cands if c]
 
 ENGINE_MULTIPV = 3
 DEFAULT_ENGINE_MS = 600
@@ -89,16 +95,19 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
     engine = None
     chosen = None
     for cand in _engine_candidates():
-        if not cand:
+        # 윈도우 exe를 리눅스에서 발견한 경우는 건너뜀
+        if cand.lower().endswith(".exe") and os.name != "nt":
+            logs.append(f"↷ {cand} — skipped (Windows .exe on {sys.platform})")
             continue
         if not os.path.exists(cand):
             logs.append(f"✗ {cand} — not found")
             continue
-        # ensure exec bit
+        # ensure exec bit (Linux/Mac)
         try:
-            mode = os.stat(cand).st_mode
-            if not (mode & stat.S_IXUSR):
-                os.chmod(cand, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            if os.name != "nt":
+                mode = os.stat(cand).st_mode
+                if not (mode & stat.S_IXUSR):
+                    os.chmod(cand, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         except Exception as e:
             logs.append(f"• {cand} — chmod attempt: {e}")
         # try run
@@ -116,9 +125,9 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
     if engine is None:
         logs.append(
             "No usable Stockfish binary.\n"
-            "👉 해결: 리포 루트에 packages.txt 생성 후 아래 한 줄만 넣으세요.\n"
+            "👉 해결: 리포 루트에 packages.txt 파일을 만들고 아래 한 줄만 넣으세요.\n"
             "    stockfish\n"
-            "그럼 Cloud에 /usr/bin/stockfish가 설치됩니다(가장 안정적)."
+            "배포가 끝나면 /usr/bin/stockfish 가 생기며 위 후보에서 자동 선택됩니다."
         )
     return engine, chosen, logs
 
@@ -177,7 +186,7 @@ if "history" not in st.session_state:
     st.session_state.history: List[Dict[str, Any]] = []
 if "engine_ms" not in st.session_state:
     st.session_state.engine_ms = DEFAULT_ENGINE_MS
-# ⚠️ 위젯-상태 분리: user_elo ↔ user_elo_widget
+# 위젯-상태 분리: user_elo ↔ user_elo_widget
 if "user_elo" not in st.session_state:
     st.session_state.user_elo = 1200
 if "user_elo_widget" not in st.session_state:
@@ -189,18 +198,17 @@ st.session_state.engine_path = engine_path
 
 # =============== Sidebar ===============
 st.sidebar.title("CheckmateAI — Streamlit")
-st.sidebar.slider("Board size (px)", 340, 640, 420, step=20, key="board_px")
+st.sidebar.slider("Board height (px)", 320, 560, 380, step=20, key="board_px")  # 기본 낮춤
 st.sidebar.slider("Engine think time (ms)", 100, 3000, key="engine_ms")
 st.sidebar.toggle("Auto-reply by AI", value=True, key="auto_ai")
-# 분리된 위젯: 숫자 입력 → 내부 상태 동기화
 st.sidebar.number_input("Your training ELO", 400, 3000, key="user_elo_widget")
 st.session_state.user_elo = int(st.session_state.user_elo_widget)
 
-with st.sidebar.expander("⚙️ Engine diagnostics", expanded=(engine is None)):
-    st.write("Chosen:", st.session_state.engine_path or "(none)")
+with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None or not _HAS_STCHESS)):
+    st.write("OS:", os.name, "| platform:", sys.platform, "| Python:", sys.version.split()[0])
+    st.write("Chosen engine:", st.session_state.engine_path or "(none)")
     for line in engine_logs: st.write(line)
-    if not _HAS_STCHESS:
-        st.error("Interactive board disabled: `stchess` 미설치. requirements.txt에 `stchess==0.0.1` 추가하세요.")
+    st.write("stchess installed:", _HAS_STCHESS)
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
@@ -226,7 +234,7 @@ with TAB_PLAY:
                                                  "san": san, "eval_cp": None, "winprob": None})
             # AI 자동 응수
             if st.session_state.worker and st.session_state.auto_ai and not new_b.is_game_over():
-                infos = st.session_state.worker.analyse(new_b, 3, st.session_state.engine_ms)
+                infos = st.session_state.worker.analyse(new_b, ENGINE_MULTIPV, st.session_state.engine_ms)
                 ai = infos[0].get("pv", [None])[0] if infos and infos[0].get("pv") else None
                 if ai:
                     san_ai = new_b.san(ai)
@@ -247,7 +255,7 @@ with TAB_PLAY:
                 st.session_state.board.pop()
                 if st.session_state.history: st.session_state.history.pop()
         if c3.button("🤖 AI move") and st.session_state.worker and not st.session_state.board.is_game_over():
-            infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
+            infos = st.session_state.worker.analyse(st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms)
             mv = infos[0].get("pv", [None])[0] if infos and infos[0].get("pv") else None
             if mv:
                 san_ai = st.session_state.board.san(mv)
@@ -263,7 +271,7 @@ with TAB_PLAY:
     with col2:
         st.markdown("**Engine candidates (MultiPV):**")
         if st.session_state.worker:
-            infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
+            infos = st.session_state.worker.analyse(st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 pv = info.get("pv") or []
                 line = pv_to_san_line(st.session_state.board, pv, 6) if pv else ""
@@ -285,22 +293,18 @@ with TAB_PUZZLES:
     if puzzles:
         pz = puzzles[0]
         st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Themes: {pz['themes']}")
-        # 퍼즐은 '첫 수' 정답만 검증
         pzb = chess.Board(pz['fen'])
         fen_before = pzb.fen()
-        # 사용자 드래그(또는 클릭) 유도
         updated_fen = st_chessboard(fen_before, key="pz_board",
                                     height=st.session_state.board_px, allow_moves=True)
-
         if updated_fen and updated_fen != fen_before:
             new_b = chess.Board(updated_fen)
             mv, san = infer_last_move(pzb, new_b)
             if mv is None:
                 st.warning("이동을 감지하지 못했습니다. 다시 시도해 주세요.")
             else:
-                # 정답 첫수 비교 (SAN/기호 제거 후 비교)
                 first = (pz["moves"].strip().split())[0]
-                # 정답/사용자 모두 +/# 제거 후 UCI 비교
+                # 정답/사용자 모두 UCI로 비교 (#+ 표시 제거 허용)
                 correct_uci = pzb.parse_san(first.replace("+","").replace("#","")).uci() \
                               if ("#" in first or "+" in first) else \
                               (pzb.parse_san(first).uci() if not first.islower() else first)
@@ -325,7 +329,7 @@ with TAB_ANALYSIS:
                       height=st.session_state.board_px, allow_moves=False)
         if st.button("Analyse current position") and st.session_state.worker:
             st.session_state.last_analysis = st.session_state.worker.analyse(
-                st.session_state.board, 3, st.session_state.engine_ms
+                st.session_state.board, ENGINE_MULTIPV, st.session_state.engine_ms
             )
     with a2:
         if "last_analysis" in st.session_state:
