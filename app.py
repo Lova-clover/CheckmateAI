@@ -13,12 +13,23 @@ st.set_page_config(page_title="CheckmateAI", layout="wide")
 
 st.markdown("""
 <style>
-    section[data-testid="st.main"] {
-        /* 메인 콘텐츠 영역 자체에 하단 여백을 주어 스크롤 공간 확보 */
-        padding-bottom: 10rem; 
+    /* Play 탭의 체스보드를 감싸는 컨테이너를 타겟 */
+    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"] [data-testid="stHtml"]:first-child {
+        /* 너비를 100%로 채우고 최대 크기를 슬라이더 값으로 제한 */
+        width: 100%%;
+        max-width: %dpx;
+        margin: auto; /* 가운데 정렬 */
+    }
+
+    /* stchess 컴포넌트가 생성하는 iframe을 타겟 */
+    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"] [data-testid="stHtml"]:first-child iframe {
+        /* 너비는 100%, 높이는 너비에 맞춰 자동으로 조절 (정사각형 유지) */
+        width: 100%%;
+        aspect-ratio: 1 / 1;
+        height: auto !important;
     }
 </style>
-""", unsafe_allow_html=True)
+""" % st.session_state.board_px, unsafe_allow_html=True)
 
 # =============== Interactive board (stchess) ===============
 try:
@@ -227,7 +238,7 @@ st.session_state.engine_path = engine_path
 
 # =============== Sidebar ===============
 st.sidebar.title("CheckmateAI — Streamlit")
-st.sidebar.slider("Board height (px)", 280, 560, 340, step=20, key="board_px")
+st.sidebar.slider("Board Max Size (px)", 280, 560, 420, step=20, key="board_px")
 st.sidebar.slider("Engine think time (ms)", 100, 3000, key="engine_ms")
 st.sidebar.toggle("Auto-reply by AI", value=True, key="auto_ai")
 st.sidebar.number_input("Your training ELO", 400, 3000, key="user_elo_widget")
@@ -250,8 +261,7 @@ with TAB_PLAY:
         b: chess.Board = st.session_state.board
         fen_before = b.fen()
 
-        updated_fen = st_chessboard(fen_before, key="main_board",
-                                    height=st.session_state.board_px, allow_moves=True)
+        updated_fen = st_chessboard(fen_before, key="main_board", allow_moves=True)
 
         # 드래그로 수를 둔 경우(FEN 변경)
         if updated_fen and updated_fen != fen_before:
@@ -324,8 +334,7 @@ with TAB_PUZZLES:
         st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Themes: {pz['themes']}")
         pzb = chess.Board(pz['fen'])
         fen_before = pzb.fen()
-        updated_fen = st_chessboard(fen_before, key="pz_board",
-                                    height=st.session_state.board_px, allow_moves=True)
+        updated_fen = st_chessboard(fen_before, key="pz_board", allow_moves=True)
         if updated_fen and updated_fen != fen_before:
             new_b = chess.Board(updated_fen)
             mv, san = infer_last_move(pzb, new_b)
