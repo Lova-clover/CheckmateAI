@@ -7,3 +7,8 @@ rich==13.7.1
 cairosvg
 cairocffi
 Pillow
+fastapi
+uvicorn
+python-chess
+firebase-admin
+

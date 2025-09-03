@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import chess, chess.engine, chess.svg
 import io
-import cairosvg
+import base64
 from PIL import Image
 
 # ==================== PAGE CONFIG ====================
@@ -95,10 +95,12 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
+# ==================== STREAMLIT CLOUD 호환 render_board ====================
 def render_board(board: chess.Board, size: int = 400):
     svg_data = chess.svg.board(board, size=size)
-    png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
-    st.image(png_data, use_column_width=True)
+    b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
+    html = f'<img src="data:image/svg+xml;base64,{b64}" width="{size}" height="{size}">'
+    st.markdown(html, unsafe_allow_html=True)
 
 # ==================== APP UI ====================
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
