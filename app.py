@@ -7,14 +7,22 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import chess, chess.engine, chess.svg
-
+import requests
 # ================= Page & base styles =================
+# app.py 상단의 st.markdown 부분을 아래 코드로 교체하세요.
 st.set_page_config(page_title="CheckmateAI", layout="wide")
+
 st.markdown("""
 <style>
-/* 하단 여백을 넉넉히 두어 '아래가 짤림' 방지 */
-.block-container { padding-bottom: 10rem; }
-div[data-testid="stSidebar"] { min-width: 320px; }
+    /* Streamlit의 메인 콘텐츠 영역에 직접 스타일 적용 */
+    section[data-testid="st.main"] {
+        padding-bottom: 10rem; /* 맨 아래에 충분한 여백을 줍니다 */
+    }
+
+    /* 사이드바 최소 너비 유지 */
+    div[data-testid="stSidebar"] {
+        min-width: 320px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -49,15 +57,18 @@ def st_chessboard(initial_fen: str, key: str, height: int = 380, allow_moves: bo
 def _engine_candidates() -> List[str]:
     """OS별로 맞는 후보만 리턴."""
     cands = [
-        os.environ.get("STOCKFISH_PATH") or "",  # 1) ENV override
-        "/usr/bin/stockfish",                    # 2) OS package (packages.txt)
-        shutil.which("stockfish") or "",         # 3) PATH
-        # 4) repo binaries (Linux 빌드만; Windows exe는 아래에서 조건부 추가)
+        # 1) Streamlit Cloud의 기본 설치 경로 (가장 안정적)
+        "/usr/bin/stockfish",
+        # 2) 환경 변수 (로컬 테스트용)
+        os.environ.get("STOCKFISH_PATH") or "",
+        # 3) PATH (로컬 테스트용)
+        shutil.which("stockfish") or "",
+        # 4) 프로젝트 내 바이너리 (Linux 빌드)
         os.path.abspath("server/stockfish/stockfish-linux-x86-64-avx2"),
         os.path.abspath("server/stockfish/stockfish"),
         os.path.abspath("engine/stockfish"),
     ]
-    if os.name == "nt":  # ✅ Windows 전용 exe는 윈도우에서만 후보에 포함
+    if os.name == "nt":  # Windows 전용 경로 추가
         cands.insert(1, os.path.abspath("server/stockfish/stockfish-windows-x86-64-avx2.exe"))
     return [c for c in cands if c]
 
@@ -65,16 +76,40 @@ ENGINE_MULTIPV = 3
 DEFAULT_ENGINE_MS = 600
 
 # =============== DB cache =================
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner="Downloading puzzle database...")
 def get_db_conn(db_path: str = "puzzles.db"):
+    # Streamlit Cloud 환경에 puzzles.db가 없으면 Dropbox에서 다운로드
     if not os.path.exists(db_path):
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE puzzles(puzzle_id TEXT, fen TEXT, moves TEXT, rating INT, themes TEXT)")
-        conn.execute("INSERT INTO puzzles VALUES(?,?,?,?,?)",
-                     ("demo_1", "8/8/8/8/8/8/5K2/6Rk w - - 0 1", "Rg1#", 1200, "mateIn1"))
+        db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
+        try:
+            r = requests.get(db_url, stream=True)
+            r.raise_for_status()  # HTTP 오류 발생 시 예외 처리
+            with open(db_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            print("✅ Puzzle DB downloaded successfully.")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Failed to download puzzle database: {e}")
+            # 다운로드 실패 시 메모리 DB로 대체
+            conn = sqlite3.connect(":memory:")
+            conn.execute("CREATE TABLE puzzles(puzzle_id TEXT, fen TEXT, moves TEXT, rating INT, themes TEXT)")
+            conn.execute("INSERT INTO puzzles VALUES(?,?,?,?,?)",
+                         ("demo_1", "8/8/8/8/8/8/5K2/6Rk w - - 0 1", "Rg1#", 1200, "mateIn1"))
+            conn.commit()
+            return conn
+
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+
+    # rating 컬럼에 인덱스가 없으면 생성 (성능 향상)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_puzzles_rating'")
+    if cursor.fetchone() is None:
+        print("⚡ Creating index on 'rating' column for faster puzzle search.")
+        conn.execute("CREATE INDEX idx_puzzles_rating ON puzzles (rating)")
         conn.commit()
-        return conn
-    return sqlite3.connect(db_path, check_same_thread=False)
+
+    return conn
 
 @st.cache_data(show_spinner=False, ttl=60)
 def get_puzzle_near_rating(target_elo: int, k: int = 1) -> List[Dict[str, Any]]:
@@ -198,7 +233,7 @@ st.session_state.engine_path = engine_path
 
 # =============== Sidebar ===============
 st.sidebar.title("CheckmateAI — Streamlit")
-st.sidebar.slider("Board height (px)", 320, 560, 380, step=20, key="board_px")  # 기본 낮춤
+st.sidebar.slider("Board height (px)", 280, 560, 340, step=20, key="board_px")
 st.sidebar.slider("Engine think time (ms)", 100, 3000, key="engine_ms")
 st.sidebar.toggle("Auto-reply by AI", value=True, key="auto_ai")
 st.sidebar.number_input("Your training ELO", 400, 3000, key="user_elo_widget")

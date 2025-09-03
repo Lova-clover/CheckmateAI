@@ -4,3 +4,4 @@ stchess==0.0.1
 pandas
 numpy>=1.23
 stockfish
+requests
