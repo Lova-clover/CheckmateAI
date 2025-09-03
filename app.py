@@ -131,7 +131,7 @@ def interactive_chessboard(fen: str, key: str, board_size: int):
                 draggable: true,
                 position: '{fen}',
                 onDrop: onDrop,
-                pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{{piece}}.png'
+                pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/cburnett/{{piece}}.png'
             }});
 
             $(window).resize(board.resize);
