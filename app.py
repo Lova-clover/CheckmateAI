@@ -1,13 +1,11 @@
 from __future__ import annotations
-import os, sys, sqlite3, math, stat, shutil
+import os, sys, sqlite3, stat, shutil
 from typing import Dict, Any, List, Tuple, Optional
-from concurrent.futures import ThreadPoolExecutor
 import requests
-import traceback
 
 import streamlit as st
 import pandas as pd
-import chess, chess.engine
+import chess, chess.engine, chess.svg # chess.svg import 추가
 import streamlit.components.v1 as components
 
 # =============== 1. PAGE CONFIG (MUST BE THE FIRST STREAMLIT COMMAND) ===============
@@ -28,16 +26,14 @@ if "last_analysis" not in st.session_state:
     st.session_state.last_analysis = None
 if "puzzle_result" not in st.session_state:
     st.session_state.puzzle_result = ""
-# FIXED: puzzle_board 초기화 추가
 if "puzzle_board" not in st.session_state:
     st.session_state.puzzle_board = chess.Board()
 
 # =============== ENGINE SETUP ===============
 def _engine_candidates() -> List[str]:
-    # shutil.which("stockfish")를 우선적으로 사용하도록 순서 변경
-    cands = [shutil.which("stockfish") or "", os.path.abspath("engine/stockfish"), "/usr/bin/stockfish"]
-    if os.name == "nt": cands.insert(1, os.path.abspath("engine/stockfish.exe"))
-    return [c for c in cands if c]
+    # packages.txt로 설치된 stockfish만 찾도록 경로 간소화
+    cand = shutil.which("stockfish")
+    return [cand] if cand else []
 
 @st.cache_resource(show_spinner="Starting chess engine...")
 def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine], Optional[str], List[str]]:
@@ -46,8 +42,8 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
         if not os.path.exists(cand):
             logs.append(f"✗ Not found: {cand}"); continue
         try:
-            if os.name != "nt" and not os.access(cand, os.X_OK):
-                os.chmod(cand, os.stat(cand).st_mode | stat.S_IXUSR)
+            # Streamlit Cloud에서는 권한 설정이 필요 없음
+            pass
         except Exception as e:
             logs.append(f"• chmod failed: {e}")
         try:
@@ -122,7 +118,6 @@ def interactive_chessboard(fen: str, key: str, board_size: int):
         var onDrop = function(source, target) {{
             var move = game.move({{ from: source, to: target, promotion: 'q' }});
             if (move === null) return 'snapback';
-            // Send the new FEN back to Streamlit
             Streamlit.setComponentValue({{ fen: game.fen(), move_uci: move.from + move.to }});
         }};
         var board = Chessboard('{key}_container', {{
@@ -157,7 +152,6 @@ with TAB_PLAY:
     col1, col2 = st.columns([1.7, 1])
     with col1:
         move_info = interactive_chessboard(st.session_state.board.fen(), key="play_board", board_size=board_size)
-        # FIXED: move_info가 딕셔너리인지 확인
         if isinstance(move_info, dict) and 'move_uci' in move_info:
             user_move = chess.Move.from_uci(move_info['move_uci'])
             if user_move in st.session_state.board.legal_moves:
@@ -213,7 +207,6 @@ with TAB_PUZZLES:
         pz = st.session_state.puzzle
         st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Find the best move")
         move_info = interactive_chessboard(st.session_state.puzzle_board.fen(), key="puzzle_board", board_size=board_size)
-        # FIXED: move_info가 딕셔너리인지 확인
         if isinstance(move_info, dict) and 'move_uci' in move_info:
             user_move_uci = move_info['move_uci']
             solution_move_uci = pz['moves'].split()[0]
