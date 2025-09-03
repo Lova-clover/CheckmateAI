@@ -5,4 +5,5 @@ numpy>=1.23
 requests
 rich==13.7.1
 cairosvg
+cairocffi
 Pillow
