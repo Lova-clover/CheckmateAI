@@ -108,23 +108,34 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 def interactive_chessboard(fen: str, key: str, board_size: int):
     board_html = f"""
         <div id="{key}_container" style="width: {board_size}px; margin: auto;"></div>
+
+        <!-- jQuery -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+        <!-- Chess.js -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+        <!-- Chessboard.js -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+
         <script>
-        var game = new Chess('{fen}');
-        var onDrop = function(source, target) {{
-            var move = game.move({{ from: source, to: target, promotion: 'q' }});
-            if (move === null) return 'snapback';
-            Streamlit.setComponentValue({{ fen: game.fen(), move_uci: move.from + move.to }});
-        }};
-        var board = Chessboard('{key}_container', {{
-            draggable: true,
-            position: '{fen}',
-            onDrop: onDrop,
+        $(document).ready(function() {{
+            var game = new Chess('{fen}');
+            
+            var onDrop = function(source, target) {{
+                var move = game.move({{ from: source, to: target, promotion: 'q' }});
+                if (move === null) return 'snapback';
+                Streamlit.setComponentValue({{ fen: game.fen(), move_uci: move.from + move.to }});
+            }};
+
+            var board = Chessboard('{key}_container', {{
+                draggable: true,
+                position: '{fen}',
+                onDrop: onDrop,
+                pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{piece}.png',
+            }});
+
+            $(window).resize(board.resize);
         }});
-        $(window).resize(board.resize);
         </script>
     """
     return components.html(board_html, height=board_size + 20, scrolling=False)
