@@ -30,10 +30,14 @@ if "puzzle_board" not in st.session_state:
     st.session_state.puzzle_board = chess.Board()
 
 # =============== ENGINE SETUP ===============
-def _engine_candidates() -> List[str]:
-    # packages.txt로 설치된 stockfish만 찾도록 경로 간소화
-    cand = shutil.which("stockfish")
-    return [cand] if cand else []
+def _engine_candidates() -> list[str]:
+    # 직접 설치 경로 지정
+    candidates = [
+        "/usr/games/stockfish",  # 기본 설치 경로
+        shutil.which("stockfish")  # 혹시 PATH에 있을 수도 있으니 포함
+    ]
+    return [c for c in candidates if c and os.path.exists(c)]
+
 
 @st.cache_resource(show_spinner="Starting chess engine...")
 def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine], Optional[str], List[str]]:
