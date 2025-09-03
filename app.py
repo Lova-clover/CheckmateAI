@@ -28,10 +28,14 @@ if "last_analysis" not in st.session_state:
     st.session_state.last_analysis = None
 if "puzzle_result" not in st.session_state:
     st.session_state.puzzle_result = ""
+# FIXED: puzzle_board 초기화 추가
+if "puzzle_board" not in st.session_state:
+    st.session_state.puzzle_board = chess.Board()
 
 # =============== ENGINE SETUP ===============
 def _engine_candidates() -> List[str]:
-    cands = [os.path.abspath("engine/stockfish"), "/usr/bin/stockfish", shutil.which("stockfish") or ""]
+    # shutil.which("stockfish")를 우선적으로 사용하도록 순서 변경
+    cands = [shutil.which("stockfish") or "", os.path.abspath("engine/stockfish"), "/usr/bin/stockfish"]
     if os.name == "nt": cands.insert(1, os.path.abspath("engine/stockfish.exe"))
     return [c for c in cands if c]
 
@@ -153,18 +157,23 @@ with TAB_PLAY:
     col1, col2 = st.columns([1.7, 1])
     with col1:
         move_info = interactive_chessboard(st.session_state.board.fen(), key="play_board", board_size=board_size)
-        if move_info:
+        # FIXED: move_info가 딕셔너리인지 확인
+        if isinstance(move_info, dict) and 'move_uci' in move_info:
             user_move = chess.Move.from_uci(move_info['move_uci'])
-            st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(user_move)})
-            st.session_state.board.push(user_move)
-            if st.session_state.worker and not st.session_state.board.is_game_over():
-                ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
-                if ai_move:
-                    st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
-                    st.session_state.board.push(ai_move)
-            st.rerun()
+            if user_move in st.session_state.board.legal_moves:
+                st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(user_move)})
+                st.session_state.board.push(user_move)
+                if st.session_state.worker and not st.session_state.board.is_game_over():
+                    ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
+                    if ai_move:
+                        st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
+                        st.session_state.board.push(ai_move)
+                st.rerun()
+
         c1, c2 = st.columns(2)
-        if c1.button("⏮️ New Game"): st.session_state.board, st.session_state.history = chess.Board(), []; st.rerun()
+        if c1.button("⏮️ New Game"):
+            st.session_state.board, st.session_state.history = chess.Board(), []
+            st.rerun()
         if c2.button("⬅️ Undo (2 plies)"):
             if len(st.session_state.board.move_stack) > 1:
                 st.session_state.board.pop(); st.session_state.board.pop()
@@ -172,12 +181,15 @@ with TAB_PLAY:
                 st.rerun()
 
     with col2:
-        if st.session_state.board.is_game_over(): st.info(f"Game over: {st.session_state.board.result()} — {st.session_state.board.outcome().termination}")
+        if st.session_state.board.is_game_over():
+            st.info(f"Game over: {st.session_state.board.result()} — {st.session_state.board.outcome().termination}")
         st.markdown("**Engine Analysis**")
         if st.session_state.worker:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
+        else:
+            st.warning("Chess engine not available for analysis.")
         st.divider()
         st.write("**Move History**")
         st.dataframe(pd.DataFrame(st.session_state.history).tail(30), use_container_width=True, hide_index=True)
@@ -187,28 +199,36 @@ with TAB_PUZZLES:
     if st.session_state.puzzle_result:
         if "Correct" in st.session_state.puzzle_result: st.success(st.session_state.puzzle_result)
         else: st.error(st.session_state.puzzle_result)
+
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo)
         st.session_state.puzzle_result = ""
-        if st.session_state.puzzle: st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
-        else: st.warning("No more puzzles found in this rating range.")
+        if st.session_state.puzzle:
+            st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
+        else:
+            st.warning("No more puzzles found in this rating range.")
         st.rerun()
 
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Find the best move")
         move_info = interactive_chessboard(st.session_state.puzzle_board.fen(), key="puzzle_board", board_size=board_size)
-        if move_info:
+        # FIXED: move_info가 딕셔너리인지 확인
+        if isinstance(move_info, dict) and 'move_uci' in move_info:
             user_move_uci = move_info['move_uci']
             solution_move_uci = pz['moves'].split()[0]
             if user_move_uci == solution_move_uci:
-                st.session_state.user_elo += 20; st.session_state.puzzle_result = "✅ Correct! +20 ELO"
+                st.session_state.user_elo += 20
+                st.session_state.puzzle_result = "✅ Correct! +20 ELO"
                 conn = get_db_conn()
-                if conn: conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)", (pz['puzzle_id'],)); conn.commit()
+                if conn:
+                    conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)", (pz['puzzle_id'],))
+                    conn.commit()
             else:
                 st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
                 st.session_state.puzzle_result = f"❌ Not quite. The best move was {solution_move_uci}"
-            st.session_state.puzzle = None; st.rerun()
+            st.session_state.puzzle = None
+            st.rerun()
 
 with TAB_ANALYSIS:
     st.subheader("Position Analysis")
@@ -217,10 +237,14 @@ with TAB_ANALYSIS:
         try:
             board_to_analyze = chess.Board(fen_to_analyze)
             a1, a2 = st.columns([1.6, 1])
-            with a1: components.html(f'<div style="max-width: {board_size}px; margin: auto;">{chess.svg.board(board_to_analyze)}</div>', height=board_size+15)
+            with a1:
+                components.html(f'<div style="max-width: {board_size}px; margin: auto;">{chess.svg.board(board_to_analyze)}</div>', height=board_size+15)
             with a2:
-                if st.button("Analyse Position", key="analyse_btn") and st.session_state.worker:
-                    st.session_state.last_analysis = st.session_state.worker.analyse(board_to_analyze, 5, st.session_state.engine_ms)
+                if st.button("Analyse Position", key="analyse_btn"):
+                    if st.session_state.worker:
+                        st.session_state.last_analysis = st.session_state.worker.analyse(board_to_analyze, 5, st.session_state.engine_ms)
+                    else:
+                        st.warning("Chess engine not available for analysis.")
                 if st.session_state.last_analysis:
                     rows = [{"Rank": i+1, "Score": pretty_score(info, board_to_analyze), "Line": pv_to_san_line(board_to_analyze, info.get("pv", []), 10)} for i, info in enumerate(st.session_state.last_analysis)]
                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
