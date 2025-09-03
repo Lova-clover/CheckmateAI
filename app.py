@@ -31,13 +31,11 @@ if "puzzle_board" not in st.session_state:
 
 # =============== ENGINE SETUP ===============
 def _engine_candidates() -> list[str]:
-    # 직접 설치 경로 지정
     candidates = [
-        "/usr/games/stockfish",  # 기본 설치 경로
-        shutil.which("stockfish")  # 혹시 PATH에 있을 수도 있으니 포함
+        "/usr/games/stockfish",
+        shutil.which("stockfish")
     ]
     return [c for c in candidates if c and os.path.exists(c)]
-
 
 @st.cache_resource(show_spinner="Starting chess engine...")
 def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine], Optional[str], List[str]]:
@@ -86,7 +84,10 @@ def get_db_conn(db_path: str = "puzzles.db"):
 def get_puzzle_near_rating(target_elo: int) -> Optional[Dict[str, Any]]:
     conn = get_db_conn()
     if not conn: return None
-    row = conn.execute("SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1", (int(target_elo) - 100, int(target_elo) + 100)).fetchone()
+    row = conn.execute(
+        "SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1",
+        (int(target_elo) - 100, int(target_elo) + 100)
+    ).fetchone()
     if not row: return None
     return dict(zip(["puzzle_id", "fen", "moves", "rating"], row))
 
@@ -108,32 +109,22 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 def interactive_chessboard(fen: str, key: str, board_size: int):
     board_html = f"""
         <div id="{key}_container" style="width: {board_size}px; margin: auto;"></div>
-
-        <!-- jQuery -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-        <!-- Chess.js -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-        <!-- Chessboard.js -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-
         <script>
-        $(document).ready(function() {{
+        $(document).ready(function(){{
             var game = new Chess('{fen}');
-            
-            var onDrop = function(source, target) {{
-                var move = game.move({{ from: source, to: target, promotion: 'q' }});
-                if (move === null) return 'snapback';
-                Streamlit.setComponentValue({{ fen: game.fen(), move_uci: move.from + move.to }});
+            var onDrop = function(source, target){{
+                var move = game.move({{from: source, to: target, promotion:'q'}});
+                if(move === null) return 'snapback';
+                Streamlit.setComponentValue({{fen: game.fen(), move_uci: move.from + move.to}});
             }};
-
             var board = Chessboard('{key}_container', {{
-                draggable: true,
-                position: '{fen}',
-                onDrop: onDrop,
-                pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/cburnett/{{piece}}.png'
+                draggable:true, position:'{fen}', onDrop:onDrop,
+                pieceTheme:'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/cburnett/{{piece}}.png'
             }});
-
             $(window).resize(board.resize);
         }});
         </script>
@@ -159,7 +150,7 @@ TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzle
 
 with TAB_PLAY:
     st.subheader("Play vs AI")
-    col1, col2 = st.columns([1.7, 1])
+    col1, col2 = st.columns([1.7,1])
     with col1:
         move_info = interactive_chessboard(st.session_state.board.fen(), key="play_board", board_size=board_size)
         if isinstance(move_info, dict) and 'move_uci' in move_info:
@@ -173,7 +164,6 @@ with TAB_PLAY:
                         st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
                         st.session_state.board.push(ai_move)
                 st.rerun()
-
         c1, c2 = st.columns(2)
         if c1.button("⏮️ New Game"):
             st.session_state.board, st.session_state.history = chess.Board(), []
@@ -183,7 +173,6 @@ with TAB_PLAY:
                 st.session_state.board.pop(); st.session_state.board.pop()
                 if len(st.session_state.history) > 1: st.session_state.history.pop(); st.session_state.history.pop()
                 st.rerun()
-
     with col2:
         if st.session_state.board.is_game_over():
             st.info(f"Game over: {st.session_state.board.result()} — {st.session_state.board.outcome().termination}")
@@ -191,7 +180,7 @@ with TAB_PLAY:
         if st.session_state.worker:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
-                st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
+                st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv',[]),6)}** `({pretty_score(info, st.session_state.board)})`")
         else:
             st.warning("Chess engine not available for analysis.")
         st.divider()
@@ -203,7 +192,6 @@ with TAB_PUZZLES:
     if st.session_state.puzzle_result:
         if "Correct" in st.session_state.puzzle_result: st.success(st.session_state.puzzle_result)
         else: st.error(st.session_state.puzzle_result)
-
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo)
         st.session_state.puzzle_result = ""
@@ -212,7 +200,6 @@ with TAB_PUZZLES:
         else:
             st.warning("No more puzzles found in this rating range.")
         st.rerun()
-
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Find the best move")
@@ -239,9 +226,9 @@ with TAB_ANALYSIS:
     if fen_to_analyze:
         try:
             board_to_analyze = chess.Board(fen_to_analyze)
-            a1, a2 = st.columns([1.6, 1])
+            a1, a2 = st.columns([1.6,1])
             with a1:
-                components.html(f'<div style="max-width: {board_size}px; margin: auto;">{chess.svg.board(board_to_analyze)}</div>', height=board_size+15)
+                components.html(f'<div style="max-width:{board_size}px; margin:auto;">{chess.svg.board(board_to_analyze)}</div>', height=board_size+15)
             with a2:
                 if st.button("Analyse Position", key="analyse_btn"):
                     if st.session_state.worker:
