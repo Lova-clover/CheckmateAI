@@ -1,6 +1,5 @@
 streamlit==1.37.0
 chess>=1.11
-streamlit_chessboard==1.0.1
 pandas
 numpy>=1.23
 requests
