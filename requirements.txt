@@ -1,6 +1,6 @@
 streamlit==1.37.0
 python-chess==1.999
-git+https://github.com/romanchekashov/streamlit-chessboard.git
+streamlit-chessboard==0.3.0
 pandas==2.2.2
 numpy==1.26.4
 requests==2.32.3
