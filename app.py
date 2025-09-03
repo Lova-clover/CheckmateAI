@@ -9,19 +9,13 @@ import pandas as pd
 import chess, chess.engine, chess.svg
 import requests
 # ================= Page & base styles =================
-# app.py 상단의 st.markdown 부분을 아래 코드로 교체하세요.
 st.set_page_config(page_title="CheckmateAI", layout="wide")
 
 st.markdown("""
 <style>
-    /* Streamlit의 메인 콘텐츠 영역에 직접 스타일 적용 */
     section[data-testid="st.main"] {
-        padding-bottom: 10rem; /* 맨 아래에 충분한 여백을 줍니다 */
-    }
-
-    /* 사이드바 최소 너비 유지 */
-    div[data-testid="stSidebar"] {
-        min-width: 320px;
+        /* 메인 콘텐츠 영역 자체에 하단 여백을 주어 스크롤 공간 확보 */
+        padding-bottom: 10rem; 
     }
 </style>
 """, unsafe_allow_html=True)
