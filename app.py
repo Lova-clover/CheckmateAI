@@ -5,7 +5,7 @@ import requests
 
 import streamlit as st
 import pandas as pd
-import chess, chess.engine, chess.svg # chess.svg import 추가
+import chess, chess.engine, chess.svg
 import streamlit.components.v1 as components
 
 # =============== 1. PAGE CONFIG (MUST BE THE FIRST STREAMLIT COMMAND) ===============
@@ -41,11 +41,6 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
     for cand in _engine_candidates():
         if not os.path.exists(cand):
             logs.append(f"✗ Not found: {cand}"); continue
-        try:
-            # Streamlit Cloud에서는 권한 설정이 필요 없음
-            pass
-        except Exception as e:
-            logs.append(f"• chmod failed: {e}")
         try:
             eng = chess.engine.SimpleEngine.popen_uci(cand, setpgrp=True)
             try: eng.configure({"Threads": 1, "Hash": 64})
