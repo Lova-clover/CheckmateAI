@@ -1,7 +1,6 @@
 streamlit==1.37.0
-python-chess==1.999
-streamlit_chessboard==0.1.1
-pandas==2.2.2
-numpy==1.26.4
-requests==2.32.3
+chess>=1.11
+pandas
+numpy>=1.23
+requests
 rich==13.7.1
