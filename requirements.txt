@@ -4,3 +4,4 @@ streamlit-chessboard==1.0.1
 pandas
 numpy>=1.23
 requests
+rich==13.7.1
