@@ -10,6 +10,47 @@ import streamlit.components.v1 as components
 import pandas as pd
 import chess, chess.engine, chess.svg
 
+import streamlit as st
+import os
+import subprocess
+
+# --- 디버깅 블록 시작 ---
+st.write("--- App Reloaded ---")
+st.write(f"Python Version: {sys.version}")
+
+# stchess 임포트 테스트
+try:
+    from stchess import board as _st_board
+    _HAS_STCHESS_DEBUG = True
+    st.success("✅ stchess library imported successfully!")
+except Exception as e:
+    _HAS_STCHESS_DEBUG = False
+    st.error(f"Failed to import stchess: {e}")
+
+# Stockfish 파일 존재 및 권한 확인
+stockfish_path = "/usr/bin/stockfish"
+st.write(f"Checking for Stockfish at: {stockfish_path}")
+if os.path.exists(stockfish_path):
+    st.success(f"✅ Found Stockfish file at {stockfish_path}")
+    
+    # 실행 권한 확인
+    if os.access(stockfish_path, os.X_OK):
+        st.success("✅ Stockfish has execute permissions.")
+        try:
+            # 직접 실행하여 버전 확인
+            result = subprocess.run([stockfish_path, "uci"], capture_output=True, text=True, timeout=5)
+            if "Stockfish" in result.stdout:
+                st.success(f"✅ Stockfish engine is working! Output:\n{result.stdout[:200]}...")
+            else:
+                st.warning(f"Stockfish ran but returned unexpected output: {result.stdout}")
+        except Exception as e:
+            st.error(f"Failed to execute Stockfish: {e}")
+    else:
+        st.error("❌ Stockfish does NOT have execute permissions.")
+else:
+    st.error("❌ Stockfish file not found.")
+# --- 디버깅 블록 끝 ---
+
 # =============== 1. Session State 초기화 (가장 먼저 실행) ===============
 # 이 부분이 스크립트 최상단에 위치해야 합니다.
 if "board_px" not in st.session_state:
