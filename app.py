@@ -7,7 +7,9 @@ import traceback
 
 import streamlit as st
 import pandas as pd
-import chess, chess.engine
+import chess, chess.engine, chess.svg
+from streamlit_chessboard import chessboard # 올바른 라이브러리 import
+import streamlit.components.v1 as components # 빠져있던 import 추가
 
 # =============== 1. PAGE CONFIG (MUST BE THE FIRST STREAMLIT COMMAND) ===============
 st.set_page_config(page_title="CheckmateAI", layout="wide")
@@ -98,7 +100,12 @@ def get_db_conn(db_path: str = "puzzles.db"):
 def get_puzzle_near_rating(target_elo: int) -> Optional[Dict[str, Any]]:
     conn = get_db_conn()
     if not conn: return None
-    row = conn.execute("SELECT puzzle_id, fen, moves, rating, themes FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) ORDER BY ABS(rating - ?) LIMIT 1", (int(target_elo),)).fetchone()
+    # Use ORDER BY RANDOM() to get a random puzzle in the range
+    row = conn.execute("""
+        SELECT puzzle_id, fen, moves, rating, themes FROM puzzles 
+        WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ?
+        ORDER BY RANDOM() LIMIT 1
+    """, (int(target_elo) - 100, int(target_elo) + 100)).fetchone()
     if not row: return None
     return dict(zip(["puzzle_id","fen","moves","rating","themes"], row))
 
@@ -118,31 +125,13 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except Exception: break
     return " ".join(parts)
 
-# =============== STABLE INTERACTIVE CHESSBOARD COMPONENT ===============
-def interactive_chessboard(board: chess.Board, key: str, board_size: int):
-    # This component uses chessboard.js and communicates with Streamlit
-    component_html = f"""
-        <div id="{key}_container"></div>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
-        <script>
-            var game = new Chess('{board.fen()}');
-            var board = Chessboard('{key}_container', {{
-                draggable: true,
-                position: '{board.fen()}',
-                onDrop: function(source, target) {{
-                    var move = game.move({{ from: source, to: target, promotion: 'q' }});
-                    if (move === null) return 'snapback';
-                    Streamlit.setComponentValue({{fen: game.fen(), move: {{ from: source, to: target, promotion: 'q' }} }});
-                }},
-            }});
-            // Adjust size
-            $(window).resize(function() {{ board.resize(); }});
-        </script>
-    """
-    return components.html(component_html, height=board_size + 20, scrolling=False)
+def infer_last_move(old_board: chess.Board, new_board: chess.Board) -> Optional[chess.Move]:
+    for move in old_board.legal_moves:
+        temp_board = old_board.copy()
+        temp_board.push(move)
+        if temp_board.board_fen() == new_board.board_fen():
+            return move
+    return None
 
 # =============== APP EXECUTION & SIDEBAR ===============
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
@@ -165,19 +154,26 @@ with TAB_PLAY:
     st.subheader("Play vs AI")
     col1, col2 = st.columns([1.7, 1])
     with col1:
-        move_info = interactive_chessboard(st.session_state.board, key="play_board", board_size=board_size)
-        if move_info:
-            user_move = chess.Move.from_uci(f"{move_info['move']['from']}{move_info['move']['to']}")
-            st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(user_move)})
-            st.session_state.board.push(user_move)
+        current_fen = st.session_state.board.fen()
+        # streamlit-chessboard는 FEN 문자열을 반환합니다.
+        new_fen = chessboard(current_fen, key="play_board", board_size=board_size)
 
-            if st.session_state.worker and not st.session_state.board.is_game_over():
-                ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
-                if ai_move:
-                    st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
-                    st.session_state.board.push(ai_move)
-            st.rerun()
-        # ... (Button logic remains the same)
+        if new_fen and new_fen != current_fen:
+            old_board = chess.Board(current_fen)
+            st.session_state.board.set_fen(new_fen)
+            user_move = infer_last_move(old_board, st.session_state.board)
+            
+            if user_move:
+                st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": old_board.san(user_move)})
+                
+                if st.session_state.worker and not st.session_state.board.is_game_over():
+                    ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
+                    if ai_move:
+                        san_ai = st.session_state.board.san(ai_move)
+                        st.session_state.board.push(ai_move)
+                        st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": san_ai})
+                st.rerun()
+
         c1, c2 = st.columns(2)
         if c1.button("⏮️ New Game"):
             st.session_state.board, st.session_state.history = chess.Board(), []
@@ -190,7 +186,6 @@ with TAB_PLAY:
                 st.rerun()
 
     with col2:
-        # ... (Analysis and history display remains the same)
         if st.session_state.board.is_game_over():
             st.info(f"Game over: {st.session_state.board.result()} — {st.session_state.board.outcome().termination}")
         st.markdown("**Engine Analysis**")
@@ -203,43 +198,49 @@ with TAB_PLAY:
         st.write("**Move History**")
         st.dataframe(pd.DataFrame(st.session_state.history).tail(30), use_container_width=True, hide_index=True)
 
-
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
+    
+    if st.session_state.puzzle_result:
+        if "Correct" in st.session_state.puzzle_result:
+            st.success(st.session_state.puzzle_result)
+        else:
+            st.error(st.session_state.puzzle_result)
+
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo)
         st.session_state.puzzle_result = ""
         if st.session_state.puzzle:
             st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
             st.rerun()
-    
-    if st.session_state.puzzle_result:
-        st.info(st.session_state.puzzle_result)
+        else:
+            st.warning("No more puzzles found in this rating range.")
 
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
-        st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']}")
+        st.caption(f"Puzzle {pz['puzzle_id']} • Rating {pz['rating']} • Find the best move for {'White' if pz['fen'].split()[1] == 'w' else 'Black'}")
         
-        move_info = interactive_chessboard(st.session_state.puzzle_board, key="puzzle_board", board_size=board_size)
-        
-        if move_info:
-            user_move = chess.Move.from_uci(f"{move_info['move']['from']}{move_info['move']['to']}")
+        current_puzzle_fen = st.session_state.puzzle_board.fen()
+        new_puzzle_fen = chessboard(current_puzzle_fen, key="puzzle_board", board_size=board_size)
+
+        if new_puzzle_fen and new_puzzle_fen != current_puzzle_fen:
+            temp_board_before_move = chess.Board(current_puzzle_fen)
+            user_move = infer_last_move(temp_board_before_move, chess.Board(new_puzzle_fen))
             solution_move = chess.Move.from_uci(pz['moves'].split()[0])
-            
-            if user_move == solution_move:
+
+            if user_move and user_move == solution_move:
                 st.session_state.user_elo += 20
                 st.session_state.puzzle_result = "✅ Correct! +20 ELO"
                 conn = get_db_conn()
                 if conn: conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)", (pz['puzzle_id'],))
             else:
-                st.session_state.user_elo -= 15
+                st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
                 st.session_state.puzzle_result = f"❌ Not quite. The best move was {solution_move.uci()}"
             
-            st.session_state.puzzle = None
+            st.session_state.puzzle = None 
             st.rerun()
 
 with TAB_ANALYSIS:
-    # ... (Analysis tab logic remains largely the same)
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
     if fen_to_analyze:
