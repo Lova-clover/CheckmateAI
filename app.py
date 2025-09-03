@@ -158,33 +158,49 @@ with TAB_PLAY:
 # ==================== PUZZLES (Chat Input) ====================
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle (Chat Input)")
+
     if st.session_state.puzzle_result:
-        if "Correct" in st.session_state.puzzle_result: st.success(st.session_state.puzzle_result)
-        else: st.error(st.session_state.puzzle_result)
+        if "Correct" in st.session_state.puzzle_result:
+            st.success(st.session_state.puzzle_result)
+        else:
+            st.error(st.session_state.puzzle_result)
+
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo)
         st.session_state.puzzle_result = ""
-        if st.session_state.puzzle: st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
-        else: st.warning("No more puzzles found in this rating range.")
-        st.rerun()
+        if st.session_state.puzzle:
+            st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
+        else:
+            st.warning("No more puzzles found in this rating range.")
+        st.experimental_rerun()
+
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         render_board(st.session_state.puzzle_board, size=board_size)
-        user_puzzle_move = st.text_input("Enter your move for the puzzle:")
-        if st.button("Submit Puzzle Move") and user_puzzle_move:
+
+        # 흑/백 표시
+        player_color = "White" if st.session_state.puzzle_board.turn else "Black"
+        st.info(f"Your color: {player_color}")
+
+        user_puzzle_move = st.text_input("Enter your move for the puzzle:", key="puzzle_input")
+        if st.button("Submit Puzzle Move"):
             try:
-                move_obj = chess.Move.from_uci(user_puzzle_move) if len(user_puzzle_move)==4 else st.session_state.puzzle_board.parse_san(user_puzzle_move)
+                move_obj = chess.Move.from_uci(user_puzzle_move) if len(user_puzzle_move) == 4 else st.session_state.puzzle_board.parse_san(user_puzzle_move)
                 solution_move_uci = pz['moves'].split()[0]
+
                 if move_obj.uci() == solution_move_uci:
                     st.session_state.user_elo += 20
-                    st.session_state.puzzle_result = "✅ Correct! +20 ELO"
+                    st.session_state.puzzle_result = f"✅ Correct! +20 ELO ({solution_move_uci})"
                     conn = get_db_conn()
-                    if conn: conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)",(pz['puzzle_id'],)); conn.commit()
+                    if conn: 
+                        conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)", (pz['puzzle_id'],))
+                        conn.commit()
                 else:
                     st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
                     st.session_state.puzzle_result = f"❌ Not quite. The best move was {solution_move_uci}"
-                st.session_state.puzzle = None
-                st.rerun()
+
+                # 체스판은 유지, 퍼즐은 초기화 안 함
+                st.session_state.puzzle_board.set_fen(pz["fen"])
             except ValueError:
                 st.warning("Invalid move format.")
 
