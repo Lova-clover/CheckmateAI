@@ -1,10 +1,12 @@
 from __future__ import annotations
-import os, sys, sqlite3, shutil, json
-from typing import Dict, Any, List, Optional, Tuple
+import os, sys, sqlite3, shutil
+from typing import Dict, Any, List, Tuple, Optional
 import requests
 import streamlit as st
+import pandas as pd
 import chess, chess.engine, chess.svg
 import pyrebase
+import json
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="CheckmateAI", layout="wide")
@@ -42,7 +44,7 @@ def login_page():
     st.subheader("Login / Register")
     if not auth or not db:
         st.error("Firebase not initialized."); st.stop()
-
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Login")
@@ -59,10 +61,11 @@ def login_page():
                     st.session_state.user_elo = user_data.get("elo", 1200)
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
                     st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
-                else:
+                else: # First-time login, create a user profile
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
             except requests.exceptions.HTTPError as e:
+                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
@@ -82,6 +85,7 @@ def login_page():
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
             except requests.exceptions.HTTPError as e:
+                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
@@ -91,9 +95,13 @@ def login_page():
             except Exception:
                 st.error("An unexpected error occurred during registration.")
 
+
+# ==================== APP EXECUTION FLOW ====================
 if not st.session_state.user_logged_in:
     login_page()
     st.stop()
+
+# --- From here, the code runs only after a successful login ---
 
 # ==================== ENGINE SETUP ====================
 @st.cache_resource
@@ -216,7 +224,7 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
             st.warning("Invalid move format.")
     return None
 
-# ==================== APP UI ====================
+# ==================== APP UI (LOGGED IN) ====================
 st.sidebar.title("CheckmateAI")
 board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
@@ -230,7 +238,6 @@ with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
-# --- PLAY VS AI TAB ---
 with TAB_PLAY:
     col1, col2 = st.columns([1.7, 1])
     with col1:
@@ -253,7 +260,6 @@ with TAB_PLAY:
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
 
-# --- PUZZLES TAB ---
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
@@ -282,7 +288,6 @@ with TAB_PUZZLES:
             st.session_state.puzzle = None 
             st.rerun()
 
-# --- ANALYSIS TAB ---
 with TAB_ANALYSIS:
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
