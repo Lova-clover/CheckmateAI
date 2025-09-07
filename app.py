@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import chess, chess.engine, chess.svg
 import pyrebase
+import json
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="CheckmateAI", layout="wide")
@@ -57,13 +58,19 @@ def login_page():
                 user_data = db.child("users").child(user['localId']).get().val()
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
-                    solved_puzzles_list = user_data.get("solved_puzzles", [])
-                    st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list else [])
+                    st.session_state.solved_puzzles = set(user_data.get("solved_puzzles", []))
                 else:
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
                 st.success("Login successful!"); st.rerun()
-            except Exception:
-                st.error("Login failed.")
+            except Exception as e:
+                try:
+                    # Firebase 에러 메시지를 파싱하여 사용자에게 보여줌
+                    error_json = e.args[1]
+                    error_message = json.loads(error_json)['error']['message']
+                    st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
+                except (IndexError, KeyError, json.JSONDecodeError):
+                    st.error("Login failed: Invalid credentials.")
+
     with col2:
         st.subheader("Register")
         reg_email = st.text_input("Email", key="reg_email")
@@ -73,8 +80,15 @@ def login_page():
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
                 st.success("Registration successful! Please login.")
-            except Exception:
-                st.error("Registration failed.")
+            except Exception as e:
+                try:
+                    # Firebase 에러 메시지를 파싱하여 사용자에게 보여줌
+                    error_json = e.args[1]
+                    error_message = json.loads(error_json)['error']['message']
+                    st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
+                except (IndexError, KeyError, json.JSONDecodeError):
+                    st.error("Registration failed: Invalid email or password.")
+
 
 # ==================== APP EXECUTION FLOW ====================
 if not st.session_state.user_logged_in:
@@ -134,26 +148,18 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
     if not puzzle_db_path: return None
     conn = sqlite3.connect(puzzle_db_path)
     try:
-        # Dynamically create placeholders for the query
         placeholders = ','.join('?' for _ in solved_ids) if solved_ids else '""'
         query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1"
         params = list(solved_ids) + [target_elo - 150, target_elo + 150]
-        
         cursor = conn.execute(query, params)
         columns = [description[0] for description in cursor.description]
         row = cursor.fetchone()
-
-        if row:
-            return dict(zip(columns, row))
-        
-        # Fallback if no puzzle in ELO range is found
+        if row: return dict(zip(columns, row))
         st.warning("No new puzzles found in your ELO range. Loading a random one.")
         fallback_query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) ORDER BY RANDOM() LIMIT 1"
         cursor = conn.execute(fallback_query, list(solved_ids))
         row = cursor.fetchone()
-        if row:
-            return dict(zip(columns, row))
-            
+        if row: return dict(zip(columns, row))
     finally:
         if conn: conn.close()
     return None
