@@ -11,4 +11,4 @@ fastapi
 uvicorn
 python-chess
 firebase-admin
-
+streamlit-image-coordinates
