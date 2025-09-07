@@ -5,7 +5,6 @@ import requests
 import streamlit as st
 import pandas as pd
 import chess, chess.engine, chess.svg
-import base64
 import pyrebase
 
 # ==================== PAGE CONFIG ====================
@@ -14,14 +13,25 @@ st.set_page_config(page_title="CheckmateAI", layout="wide")
 # ==================== SESSION STATE DEFAULTS ====================
 def initialize_session_state():
     defaults = {
-        "board": chess.Board(), "history": [], "engine_ms": 600, "user_elo": 1200,
-        "puzzle": None, "puzzle_board": chess.Board(), "last_analysis": None,
-        "puzzle_result": "", "selected_square": None, "user_logged_in": False,
-        "username": "", "user_info": None, "solved_puzzles": set(),
-        "play_move_input": "", "puzzle_move_input": ""
+        "board": chess.Board(),
+        "history": [],
+        "engine_ms": 600,
+        "user_elo": 1200,
+        "puzzle": None,
+        "puzzle_board": chess.Board(),
+        "last_analysis": None,
+        "puzzle_result": "",
+        "selected_square": None,
+        "user_logged_in": False,
+        "username": "",
+        "user_info": None,
+        "solved_puzzles": set(),
+        "play_move_input": "",
+        "puzzle_move_input": ""
     }
     for k, v in defaults.items():
-        if k not in st.session_state: st.session_state[k] = v
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 initialize_session_state()
 
@@ -32,7 +42,7 @@ def init_firebase():
         firebase_config = st.secrets["firebase_credentials"]
         return pyrebase.initialize_app(firebase_config)
     except Exception as e:
-        st.error(f"Firebase initialization failed: {e}. Check your Streamlit Secrets.")
+        st.error(f"Firebase initialization failed: {e}")
         return None
 
 firebase = init_firebase()
@@ -66,7 +76,10 @@ class EngineWorker:
         try: return self.engine.play(board, limit).move
         except chess.engine.EngineTerminatedError: return None
 
-# ==================== PUZZLE DATABASE (LOCAL SQLITE) ====================
+engine, engine_path, engine_logs = open_engine_with_diagnostics()
+st.session_state.worker = EngineWorker(engine) if engine else None
+
+# ==================== PUZZLE DATABASE ====================
 @st.cache_resource(show_spinner="Connecting to puzzle database...")
 def get_puzzle_db_conn(puzzle_db_path: str = "puzzles.db"):
     if not os.path.exists(puzzle_db_path):
@@ -98,10 +111,8 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
     elo_range_df = unsolved_df[(unsolved_df['rating'] >= target_elo - 150) & (unsolved_df['rating'] <= target_elo + 150)]
     if not elo_range_df.empty:
         return elo_range_df.sample(1).to_dict('records')[0]
-    st.warning("No new puzzles in your ELO range. Loading a random one.")
     if not unsolved_df.empty:
         return unsolved_df.sample(1).to_dict('records')[0]
-    st.info("You've solved all puzzles! Progress will be reset.")
     if db and st.session_state.user_info:
         db.child("users").child(st.session_state.user_info['localId']).child("solved_puzzles").remove()
     return puzzles_df.sample(1).to_dict('records')[0]
@@ -120,7 +131,7 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-# ==================== BOARD RENDER (STABLE MOUSE CLICK) ====================
+# ==================== BOARD RENDER ====================
 def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
     legal_moves_for_selected = []
     if st.session_state.selected_square is not None:
@@ -150,13 +161,12 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
                         from_sq = chess.SQUARE_NAMES[st.session_state.selected_square]
                         st.session_state[move_input_key] = f"{from_sq}{square_name}"
                         st.session_state.selected_square = None
-                    # REMOVED st.rerun() for stability
 
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         try:
             move = board.parse_uci(st.session_state[move_input_key])
             if move in board.legal_moves:
-                st.session_state[move_input_key] = "" # Clear input after move
+                st.session_state[move_input_key] = ""
                 return move
             else:
                 st.warning("Illegal move.")
@@ -164,11 +174,11 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
             st.warning("Invalid move format.")
     return None
 
-# ==================== FIREBASE LOGIN / REGISTER UI ====================
+# ==================== LOGIN / REGISTER ====================
 def login_page():
     st.subheader("Login / Register")
     if not auth or not db:
-        st.error("Firebase is not initialized. Cannot proceed."); st.stop()
+        st.error("Firebase not initialized."); st.stop()
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Login")
@@ -183,14 +193,12 @@ def login_page():
                 user_data = db.child("users").child(user['localId']).get().val()
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
-                    solved_puzzles_list = user_data.get("solved_puzzles", [])
-                    st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list else [])
+                    st.session_state.solved_puzzles = set(user_data.get("solved_puzzles", []))
                 else:
-                    new_user_data = {"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]}
-                    db.child("users").child(user['localId']).set(new_user_data)
-                st.success("Login successful!"); st.rerun()
+                    db.child("users").child(user['localId']).set({"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
+                st.success("Login successful!"); st.experimental_rerun()
             except Exception:
-                st.error("Failed to login. Check your credentials.")
+                st.error("Login failed.")
     with col2:
         st.subheader("Register")
         reg_email = st.text_input("Email", key="reg_email")
@@ -198,30 +206,34 @@ def login_page():
         if st.button("Register"):
             try:
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
-                user_data = {"email": reg_email, "elo": 1200, "solved_puzzles": ["dummy_id"]}
-                db.child("users").child(user['localId']).set(user_data)
+                db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
                 st.success("Registration successful! Please login.")
             except Exception:
-                st.error("Failed to register. The email might already be in use.")
+                st.error("Registration failed.")
 
 # ==================== APP UI ====================
-engine, engine_path, engine_logs = open_engine_with_diagnostics()
-st.session_state.worker = EngineWorker(engine) if engine else None
 st.sidebar.title("CheckmateAI")
 board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
+
 if st.session_state.user_logged_in:
     st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
     st.sidebar.write(f"ELO: **{st.session_state.user_elo}**")
     if st.sidebar.button("Logout"):
-        st.session_state.clear(); initialize_session_state(); st.rerun()
+        st.session_state.clear()
+        initialize_session_state()
+        st.experimental_rerun()
+else:
+    login_page()
+    st.stop()
+
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
-    st.write(f"Python: {sys.version.split()[0]}"); st.write(f"Chosen engine: {engine_path or '(none)'}")
+    st.write(f"Python: {sys.version.split()[0]}")
+    st.write(f"Chosen engine: {engine_path or '(none)'}")
     for line in engine_logs: st.write(line)
-if not st.session_state.user_logged_in:
-    login_page(); st.stop()
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
+
 with TAB_PLAY:
     st.subheader("Play vs AI")
     col1, col2 = st.columns([1.7, 1])
@@ -233,17 +245,19 @@ with TAB_PLAY:
                 with st.spinner("AI is thinking..."):
                     ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
                 if ai_move: st.session_state.board.push(ai_move)
-            st.rerun()
+            st.experimental_rerun()
     with col2:
         st.write("Move History")
         san_history = [st.session_state.board.san(m) for m in st.session_state.board.move_stack]
         st.text_area("Moves", value=" ".join(san_history), height=200, disabled=True)
-        if st.session_state.board.is_game_over(): st.info(f"Game over: {st.session_state.board.result()}")
+        if st.session_state.board.is_game_over():
+            st.info(f"Game over: {st.session_state.board.result()}")
         st.markdown("**Engine Analysis**")
         if st.session_state.worker:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
+
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
@@ -253,7 +267,7 @@ with TAB_PUZZLES:
         st.session_state.puzzle_result = ""
         if st.session_state.puzzle:
             st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
-        st.rerun()
+        st.experimental_rerun()
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         st.info(f"Your color: {'White' if st.session_state.puzzle_board.turn else 'Black'}")
@@ -270,7 +284,8 @@ with TAB_PUZZLES:
                 st.session_state.puzzle_result = f"❌ Incorrect. The move was {solution_move_uci}"
             db.child("users").child(user_id).update({"elo": st.session_state.user_elo, "solved_puzzles": list(st.session_state.solved_puzzles)})
             st.session_state.puzzle = None 
-            st.rerun()
+            st.experimental_rerun()
+
 with TAB_ANALYSIS:
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
