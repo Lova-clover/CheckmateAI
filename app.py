@@ -22,7 +22,7 @@ session_defaults = {
     "puzzle_board": chess.Board(),
     "last_analysis": None,
     "puzzle_result": "",
-    "selected_square": None, # 'selected_from' -> 'selected_square'
+    "selected_square": None,
     "user_logged_in": False,
     "username": ""
 }
@@ -81,51 +81,62 @@ def get_db_conn(db_path: str = "puzzles.db"):
         puzzle_count = 0
 
     if puzzle_count == 0:
-        st.info("Puzzle database is empty. Downloading...")
-        temp_db_path = "temp_puzzles.db"
-        db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
-        try:
-            r = requests.get(db_url, stream=True)
-            r.raise_for_status()
-            with open(temp_db_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            temp_conn = sqlite3.connect(temp_db_path)
-            sql_dump = "\n".join(temp_conn.iterdump())
-            c.executescript(sql_dump)
-            conn.commit()
-            temp_conn.close()
-            os.remove(temp_db_path)
-            st.success("Puzzle database downloaded and integrated.")
-        except requests.exceptions.RequestException as e:
-            st.error(f"Failed to download puzzle database: {e}")
-            return None
-        except Exception as e:
-            st.error(f"Failed to integrate puzzle data: {e}")
-            if os.path.exists(temp_db_path):
+        with st.spinner("Puzzle database is empty. Downloading..."):
+            temp_db_path = "temp_puzzles.db"
+            db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
+            try:
+                r = requests.get(db_url, stream=True)
+                r.raise_for_status()
+                with open(temp_db_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                # Use pandas to read the table and insert into the main DB
+                temp_conn = sqlite3.connect(temp_db_path)
+                df = pd.read_sql_query("SELECT * FROM puzzles", temp_conn)
+                df.to_sql("puzzles", conn, if_exists="replace", index=False)
+                conn.commit()
+                temp_conn.close()
                 os.remove(temp_db_path)
-            return None
+                st.success("Puzzle database downloaded and integrated.")
+                st.rerun()
+
+            except requests.exceptions.RequestException as e:
+                st.error(f"Failed to download puzzle database: {e}")
+                if os.path.exists(temp_db_path): os.remove(temp_db_path)
+                return None
+            except Exception as e:
+                st.error(f"Failed to integrate puzzle data: {e}")
+                if os.path.exists(temp_db_path): os.remove(temp_db_path)
+                return None
     return conn
 
 @st.cache_data(show_spinner=False, ttl=60)
 def get_puzzle_near_rating(target_elo: int) -> Optional[Dict[str, Any]]:
     conn = get_db_conn()
     if not conn: return None
-    row = conn.execute(
-        "SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1",
-        (target_elo - 100, target_elo + 100)
-    ).fetchone()
-    if not row: return None
-    return dict(zip(["puzzle_id", "fen", "moves", "rating"], row))
+    try:
+        row = conn.execute(
+            "SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1",
+            (target_elo - 100, target_elo + 100)
+        ).fetchone()
+        if not row: return None
+        return dict(zip(["puzzle_id", "fen", "moves", "rating"], row))
+    except sqlite3.OperationalError as e:
+        st.error(f"Database error while fetching puzzle: {e}")
+        return None
 
 def top3_puzzles() -> List[Dict[str, Any]]:
     conn = get_db_conn()
     if not conn: return []
-    rows = conn.execute(
-        "SELECT puzzle_id, fen, moves, rating FROM puzzles ORDER BY rating DESC LIMIT 3"
-    ).fetchall()
-    return [dict(zip(["puzzle_id", "fen", "moves", "rating"], r)) for r in rows]
+    try:
+        rows = conn.execute(
+            "SELECT puzzle_id, fen, moves, rating FROM puzzles ORDER BY rating DESC LIMIT 3"
+        ).fetchall()
+        return [dict(zip(["puzzle_id", "fen", "moves", "rating"], r)) for r in rows]
+    except sqlite3.OperationalError as e:
+        st.error(f"Database error while fetching top puzzles: {e}")
+        return []
 
 # ==================== HELPERS ====================
 def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
@@ -152,9 +163,8 @@ def coords_to_square(x, y, board_size):
 def render_board_and_handle_clicks(board: chess.Board, size: int = 400, key_prefix: str = "play"):
     last_move = board.peek() if board.move_stack else None
     
-    # Highlight selected square and legal moves
     squares_to_check = []
-    if st.session_state.selected_square:
+    if st.session_state.selected_square is not None:
         squares_to_check.append(st.session_state.selected_square)
         for move in board.legal_moves:
             if move.from_square == st.session_state.selected_square:
@@ -163,23 +173,21 @@ def render_board_and_handle_clicks(board: chess.Board, size: int = 400, key_pref
     svg_data = chess.svg.board(board, size=size, lastmove=last_move, check=board.king(board.turn) if board.is_check() else None, squares=chess.SquareSet(squares_to_check))
     b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
     
-    # Use streamlit-image-coordinates for click handling
     coords = streamlit_image_coordinates(f"data:image/svg+xml;base64,{b64}", width=size, height=size, key=f"{key_prefix}_board")
 
     if coords:
         square = coords_to_square(coords["x"], coords["y"], size)
         
-        if st.session_state.selected_square:
+        if st.session_state.selected_square is not None:
             move = chess.Move(st.session_state.selected_square, square)
-            # Promotion handling
             if board.piece_at(st.session_state.selected_square).piece_type == chess.PAWN:
                 if chess.square_rank(square) == 0 or chess.square_rank(square) == 7:
-                    move.promotion = chess.QUEEN # Auto-promote to Queen for simplicity
+                    move.promotion = chess.QUEEN
             
             if move in board.legal_moves:
                 st.session_state.selected_square = None
                 return move
-            else: # If the second click is not a legal move, assume it's a new selection
+            else:
                 st.session_state.selected_square = square if board.piece_at(square) else None
         else:
             if board.piece_at(square) is not None:
@@ -191,6 +199,10 @@ def render_board_and_handle_clicks(board: chess.Board, size: int = 400, key_pref
 def login_page():
     st.subheader("Login / Register")
     conn = get_db_conn()
+    if not conn:
+        st.error("Database connection failed. Please refresh.")
+        st.stop()
+        
     c = conn.cursor()
     col1, col2 = st.columns(2)
 
@@ -233,8 +245,9 @@ if st.session_state.user_logged_in:
     st.sidebar.write(f"Logged in as: {st.session_state.username}")
     st.sidebar.write(f"ELO: {st.session_state.user_elo}")
     if st.sidebar.button("Logout"):
-        for k in session_defaults:
-            st.session_state[k] = session_defaults[k]
+        # Clear session state on logout
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
@@ -258,15 +271,14 @@ with TAB_PLAY:
             st.session_state.history.append({"ply": len(st.session_state.history) + 1, "san": st.session_state.board.san(move)})
             st.session_state.board.push(move)
             
-            # Immediately render the board after user's move
-            st.rerun()
-            
+            # AI's turn
             if st.session_state.worker and not st.session_state.board.is_game_over():
-                ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
+                with st.spinner("AI is thinking..."):
+                    ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
                 if ai_move:
                     st.session_state.history.append({"ply": len(st.session_state.history) + 1, "san": st.session_state.board.san(ai_move)})
                     st.session_state.board.push(ai_move)
-                    st.rerun()
+            st.rerun()
 
     with col2:
         st.write("Move History")
@@ -315,7 +327,6 @@ with TAB_PUZZLES:
                     conn.execute("UPDATE users SET elo=? WHERE username=?", (st.session_state.user_elo, st.session_state.username))
                     conn.commit()
             
-            # Reset puzzle state for next one
             st.session_state.puzzle = None 
             st.rerun()
 
@@ -332,7 +343,6 @@ with TAB_ANALYSIS:
             board_to_analyze = chess.Board(fen_to_analyze)
             a1, a2 = st.columns([1.6, 1])
             with a1: 
-                # Analysis tab does not need move making, so just display the board
                 svg_data = chess.svg.board(board_to_analyze, size=board_size)
                 b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
                 st.image(f"data:image/svg+xml;base64,{b64}")
