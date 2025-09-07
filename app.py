@@ -16,7 +16,7 @@ def initialize_session_state():
     defaults = {
         "board": chess.Board(), "history": [], "engine_ms": 600, "user_elo": 1200,
         "puzzle": None, "puzzle_board": chess.Board(), "last_analysis": None,
-        "puzzle_result": "", "selected_square": None, "user_logged_in": False,
+        "puzzle_result": "", "user_logged_in": False,
         "username": "", "user_info": None, "solved_puzzles": set(),
         "play_move_input": "", "puzzle_move_input": ""
     }
@@ -53,6 +53,7 @@ def login_page():
         if st.button("Login"):
             try:
                 user = auth.sign_in_with_email_and_password(email, password)
+                # 로그인 성공 시만 세션 업데이트
                 st.session_state.user_logged_in = True
                 st.session_state.user_info = user
                 st.session_state.username = user['email']
@@ -61,16 +62,15 @@ def login_page():
                     st.session_state.user_elo = user_data.get("elo", 1200)
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
                     st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
-                else: # First-time login, create a user profile
+                else:
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
             except requests.exceptions.HTTPError as e:
-                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
                 except json.JSONDecodeError:
-                     error_message = "INVALID_CREDENTIALS"
+                    error_message = "INVALID_CREDENTIALS"
                 st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
             except Exception:
                 st.error("An unexpected error occurred during login.")
@@ -85,7 +85,6 @@ def login_page():
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
             except requests.exceptions.HTTPError as e:
-                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
@@ -95,13 +94,10 @@ def login_page():
             except Exception:
                 st.error("An unexpected error occurred during registration.")
 
-
 # ==================== APP EXECUTION FLOW ====================
 if not st.session_state.user_logged_in:
     login_page()
     st.stop()
-
-# --- From here, the code runs only after a successful login ---
 
 # ==================== ENGINE SETUP ====================
 @st.cache_resource
@@ -183,45 +179,21 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-# ==================== BOARD RENDER ====================
-def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
-    legal_moves_for_selected = []
-    if st.session_state.selected_square is not None:
-        legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
-    
-    svg = chess.svg.board(
-        board, size=size, lastmove=board.peek() if board.move_stack else None,
-        check=board.king(board.turn) if board.is_check() else None,
-        squares=chess.SquareSet(legal_moves_for_selected + ([st.session_state.selected_square] if st.session_state.selected_square is not None else []))
-    )
-    st.image(svg, width=size)
-    
+# ==================== BOARD RENDER (TEXT ONLY) ====================
+def render_board_text_only(board: chess.Board, key_prefix: str = "play"):
     move_input_key = f"{key_prefix}_move_input"
-    st.text_input("Move (UCI format)", st.session_state.get(move_input_key, ""), key=move_input_key, placeholder="Click squares or type move...")
-    
-    cols = st.columns(8)
-    for i in range(8):
-        with cols[i]:
-            for j in range(8):
-                square = chess.square(i, 7 - j)
-                if st.button(" ", key=f"{key_prefix}_btn_{square}", help=chess.SQUARE_NAMES[square]):
-                    if st.session_state.selected_square is None:
-                        st.session_state.selected_square = square
-                        st.session_state[move_input_key] = chess.SQUARE_NAMES[square]
-                    else:
-                        from_sq = chess.SQUARE_NAMES[st.session_state.selected_square]
-                        to_sq = chess.SQUARE_NAMES[square]
-                        st.session_state[move_input_key] = f"{from_sq}{to_sq}"
-                        st.session_state.selected_square = None
-
+    move_uci = st.text_input("Enter Move (UCI format, e.g., e2e4):", st.session_state.get(move_input_key, ""), key=move_input_key)
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         try:
-            move = board.parse_uci(st.session_state[move_input_key])
+            move = board.parse_uci(move_uci)
             if move in board.legal_moves:
-                st.session_state[move_input_key] = ""; return move
-            else: st.warning("Illegal move.")
+                st.session_state[move_input_key] = ""
+                return move
+            else:
+                st.warning("Illegal move.")
         except ValueError:
             st.warning("Invalid move format.")
+    st.image(chess.svg.board(board, size=420))
     return None
 
 # ==================== APP UI (LOGGED IN) ====================
@@ -242,7 +214,7 @@ with TAB_PLAY:
     col1, col2 = st.columns([1.7, 1])
     with col1:
         st.subheader("Play vs AI")
-        move = render_board_with_mouse(st.session_state.board, size=board_size, key_prefix="play")
+        move = render_board_text_only(st.session_state.board, key_prefix="play")
         if move:
             st.session_state.board.push(move)
             if st.session_state.worker and not st.session_state.board.is_game_over():
@@ -273,7 +245,7 @@ with TAB_PUZZLES:
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         st.info(f"Your color: {'White' if st.session_state.puzzle_board.turn else 'Black'}")
-        move_obj = render_board_with_mouse(st.session_state.puzzle_board, size=board_size, key_prefix="puzzle")
+        move_obj = render_board_text_only(st.session_state.puzzle_board, key_prefix="puzzle")
         if move_obj and db:
             solution_move_uci = pz['moves'].split()[0]
             user_id = st.session_state.user_info['localId']
