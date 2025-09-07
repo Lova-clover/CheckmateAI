@@ -61,27 +61,65 @@ class EngineWorker:
         except: return None
 
 # ==================== DATABASE ====================
-@st.cache_resource(show_spinner="Connecting to puzzle database...")
+@st.cache_resource(show_spinner="Connecting to database...")
 def get_db_conn(db_path: str = "puzzles.db"):
-    need_download = not os.path.exists(db_path)
+    # 1. 데이터베이스 연결 및 테이블 생성 (파일이 없으면 새로 만듦)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS solved_puzzles (puzzle_id TEXT PRIMARY KEY)")
     c.execute("""CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY, 
-                    password_hash TEXT, 
-                    elo INTEGER DEFAULT 1200
-                )""")
+                   username TEXT PRIMARY KEY,
+                   password_hash TEXT,
+                   elo INTEGER DEFAULT 1200
+               )""")
+    c.execute("CREATE TABLE IF NOT EXISTS solved_puzzles (puzzle_id TEXT PRIMARY KEY)")
+    # puzzles 테이블은 다운로드로 채울 것이므로 여기서 만들지 않아도 됩니다.
     conn.commit()
-    if need_download:
+
+    # 2. 퍼즐 테이블이 비어있는지 확인
+    try:
+        c.execute("SELECT count(*) FROM puzzles")
+        puzzle_count = c.fetchone()[0]
+    except sqlite3.OperationalError:
+        puzzle_count = 0
+
+    # 3. 퍼즐 데이터가 없다면 다운로드하여 채우기
+    if puzzle_count == 0:
+        st.info("Puzzle database is empty. Downloading...")
+        # 임시 DB 파일 다운로드
+        temp_db_path = "temp_puzzles.db"
         db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
         try:
-            r = requests.get(db_url, stream=True); r.raise_for_status()
-            with open(db_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+            r = requests.get(db_url, stream=True)
+            r.raise_for_status()
+            with open(temp_db_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            # 다운로드한 DB에서 puzzles 테이블을 현재 DB로 복사
+            temp_conn = sqlite3.connect(temp_db_path)
+            temp_c = temp_conn.cursor()
+            
+            # puzzles 테이블 스키마와 데이터를 SQL 덤프로 만듭니다.
+            sql_dump = "\n".join(temp_conn.iterdump())
+            
+            # 현재 연결된 DB에 SQL 덤프를 실행합니다.
+            c.executescript(sql_dump)
+            conn.commit()
+
+            temp_conn.close()
+            os.remove(temp_db_path)
+            st.success("Puzzle database downloaded and integrated.")
+
         except requests.exceptions.RequestException as e:
             st.error(f"Failed to download puzzle database: {e}")
             return None
+        except Exception as e:
+            st.error(f"Failed to integrate puzzle data: {e}")
+            # 다운로드 실패 시 임시 파일 정리
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)
+            return None
+            
     return conn
 
 @st.cache_data(show_spinner=False, ttl=60)
