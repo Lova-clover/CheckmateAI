@@ -3,6 +3,7 @@ import os, sys, sqlite3, shutil
 from typing import Dict, Any, List, Tuple, Optional
 import requests
 import streamlit as st
+import pandas as pd  
 import chess, chess.engine, chess.svg
 import base64
 import pyrebase
@@ -94,26 +95,17 @@ puzzles_df = get_puzzles_as_df()
 
 def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[str, Any]]:
     if puzzles_df is None: return None
-    
     unsolved_df = puzzles_df[~puzzles_df['puzzle_id'].isin(solved_ids)]
-    
-    elo_range_df = unsolved_df[
-        (unsolved_df['rating'] >= target_elo - 150) & 
-        (unsolved_df['rating'] <= target_elo + 150)
-    ]
-
+    elo_range_df = unsolved_df[(unsolved_df['rating'] >= target_elo - 150) & (unsolved_df['rating'] <= target_elo + 150)]
     if not elo_range_df.empty:
         return elo_range_df.sample(1).to_dict('records')[0]
-    
     st.warning("No new puzzles found in your ELO range. Loading a random one.")
     if not unsolved_df.empty:
         return unsolved_df.sample(1).to_dict('records')[0]
-    
     st.info("You've solved all the puzzles! Resetting your progress for fun.")
     if db and st.session_state.user_info:
         db.child("users").child(st.session_state.user_info['localId']).child("solved_puzzles").remove()
     return puzzles_df.sample(1).to_dict('records')[0]
-
 
 # ==================== HELPERS ====================
 def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
@@ -129,56 +121,58 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-
-# ==================== BOARD RENDER (STABLE MOUSE CLICK) ====================
+# ==================== BOARD RENDER (IMPROVED MOUSE CLICK) ====================
 def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
     legal_moves_for_selected = []
     if st.session_state.selected_square is not None:
         legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
     
     svg_data = chess.svg.board(
-        board,
-        size=size,
+        board, size=size,
         lastmove=board.peek() if board.move_stack else None,
         check=board.king(board.turn) if board.is_check() else None,
         squares=chess.SquareSet(legal_moves_for_selected + ([st.session_state.selected_square] if st.session_state.selected_square is not None else []))
     )
     st.image(svg_data, width=size)
     
-    move_uci = st.text_input("Enter move (e.g. e2e4) or click squares", key=f"{key_prefix}_move_input", placeholder="Click two squares or type move here").lower()
+    # Text input to show and confirm the move
+    move_uci = st.text_input("Move (UCI format)", key=f"{key_prefix}_move_input", placeholder="Click squares or type move (e.g., e2e4)").lower()
     
-    clicked_move = None
-    
-    # Create a grid of buttons for clicking
-    # This is a bit of a hacky way to get clickable squares in Streamlit
-    # A custom component would be better, but this works without extra dependencies
-    square_size = size // 8
-    
-    # For a better UI, we will use text input as the primary move maker
-    # and clicks will just fill the text input
-    
-    # We will need to re-think the click logic to be more intuitive.
-    # For now, let's stick with the text input as it's the most reliable.
-    
+    # Grid of transparent buttons for clicking
+    cols = st.columns(8)
+    for i in range(8):
+        with cols[i]:
+            for j in range(8):
+                square = chess.square(i, 7 - j)
+                square_name = chess.SQUARE_NAMES[square]
+                if st.button(" ", key=f"{key_prefix}_btn_{square_name}", help=square_name):
+                    if st.session_state.selected_square is None:
+                        st.session_state.selected_square = square
+                        st.session_state[f"{key_prefix}_move_input"] = square_name
+                    else:
+                        from_sq = chess.SQUARE_NAMES[st.session_state.selected_square]
+                        st.session_state[f"{key_prefix}_move_input"] = f"{from_sq}{square_name}"
+                        st.session_state.selected_square = None
+                    st.rerun()
+
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         try:
-            move = board.parse_uci(move_uci)
+            move = board.parse_uci(st.session_state[f"{key_prefix}_move_input"])
             if move in board.legal_moves:
                 return move
             else:
                 st.warning("Illegal move.")
         except ValueError:
-            st.warning("Invalid move format. Use UCI format like 'e2e4'.")
+            st.warning("Invalid move format.")
     return None
-
 
 # ==================== FIREBASE LOGIN / REGISTER UI ====================
 def login_page():
+    # ... (Firebase login/register logic - no changes) ...
     st.subheader("Login / Register")
     if not auth or not db:
         st.error("Firebase is not initialized. Cannot proceed.")
         st.stop()
-        
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Login")
@@ -190,22 +184,18 @@ def login_page():
                 st.session_state.user_logged_in = True
                 st.session_state.user_info = user
                 st.session_state.username = user['email']
-                
                 user_data = db.child("users").child(user['localId']).get().val()
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
                     st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list else [])
-                else: # First time login for this user, create data
+                else:
                     new_user_data = {"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]}
                     db.child("users").child(user['localId']).set(new_user_data)
-
-
                 st.success("Login successful!")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Failed to login. Check your credentials.")
-
+            except Exception:
+                st.error("Failed to login. Check your credentials.")
     with col2:
         st.subheader("Register")
         reg_email = st.text_input("Email", key="reg_email")
@@ -216,8 +206,8 @@ def login_page():
                 user_data = {"email": reg_email, "elo": 1200, "solved_puzzles": ["dummy_id"]}
                 db.child("users").child(user['localId']).set(user_data)
                 st.success("Registration successful! Please login.")
-            except Exception as e:
-                st.error(f"Failed to register. The email might already be in use.")
+            except Exception:
+                st.error("Failed to register. The email might already be in use.")
 
 # ==================== APP UI ====================
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
@@ -265,13 +255,11 @@ with TAB_PLAY:
         st.text_area("Moves", value=" ".join(san_history), height=200, disabled=True)
         if st.session_state.board.is_game_over():
             st.info(f"Game over: {st.session_state.board.result()}")
-        
         st.markdown("**Engine Analysis**")
         if st.session_state.worker:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
-
 
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
@@ -320,7 +308,7 @@ with TAB_ANALYSIS:
             if st.button("Analyze Position", key="analyze_btn"):
                 if st.session_state.worker:
                     with st.spinner("Analyzing..."):
-                        infos = st.session_state.worker.analyse(board_to_analyze, 5, 2000) # Deeper analysis
+                        infos = st.session_state.worker.analyse(board_to_analyze, 5, 2000)
                     for i, info in enumerate(infos, 1):
                         st.write(f"{i}. **{pv_to_san_line(board_to_analyze, info.get('pv', []), 8)}** `({pretty_score(info, board_to_analyze)})`")
         except ValueError:
