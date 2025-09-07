@@ -91,7 +91,6 @@ def get_db_conn(db_path: str = "puzzles.db"):
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
                 
-                # Use pandas to read the table and insert into the main DB
                 temp_conn = sqlite3.connect(temp_db_path)
                 df = pd.read_sql_query("SELECT * FROM puzzles", temp_conn)
                 df.to_sql("puzzles", conn, if_exists="replace", index=False)
@@ -180,7 +179,8 @@ def render_board_and_handle_clicks(board: chess.Board, size: int = 400, key_pref
         
         if st.session_state.selected_square is not None:
             move = chess.Move(st.session_state.selected_square, square)
-            if board.piece_at(st.session_state.selected_square).piece_type == chess.PAWN:
+            piece = board.piece_at(st.session_state.selected_square)
+            if piece and piece.piece_type == chess.PAWN:
                 if chess.square_rank(square) == 0 or chess.square_rank(square) == 7:
                     move.promotion = chess.QUEEN
             
@@ -245,9 +245,8 @@ if st.session_state.user_logged_in:
     st.sidebar.write(f"Logged in as: {st.session_state.username}")
     st.sidebar.write(f"ELO: {st.session_state.user_elo}")
     if st.sidebar.button("Logout"):
-        # Clear session state on logout
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        for key in list(session_defaults.keys()):
+            st.session_state[key] = session_defaults[key]
         st.rerun()
 
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
@@ -271,7 +270,6 @@ with TAB_PLAY:
             st.session_state.history.append({"ply": len(st.session_state.history) + 1, "san": st.session_state.board.san(move)})
             st.session_state.board.push(move)
             
-            # AI's turn
             if st.session_state.worker and not st.session_state.board.is_game_over():
                 with st.spinner("AI is thinking..."):
                     ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
