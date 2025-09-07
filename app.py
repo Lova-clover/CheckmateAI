@@ -61,10 +61,11 @@ def login_page():
                     st.session_state.user_elo = user_data.get("elo", 1200)
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
                     st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
-                else: 
+                else: # First-time login, create a user profile
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
             except requests.exceptions.HTTPError as e:
+                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
@@ -84,6 +85,7 @@ def login_page():
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
             except requests.exceptions.HTTPError as e:
+                # Correctly parse the error from Pyrebase's HTTPError
                 error_data = e.args[1] if len(e.args) > 1 else "{}"
                 try:
                     error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
