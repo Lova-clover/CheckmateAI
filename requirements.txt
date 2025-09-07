@@ -12,3 +12,4 @@ uvicorn
 python-chess
 firebase-admin
 streamlit-image-coordinates
+pyrebase4
