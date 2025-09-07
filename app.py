@@ -1,32 +1,27 @@
 from __future__ import annotations
-import os, sys, shutil
-from typing import List, Optional, Tuple
-import json
+import os, sys, sqlite3, shutil
+from typing import Dict, Any, List, Tuple, Optional
+import requests
 import streamlit as st
-import chess, chess.engine
+import pandas as pd
+import chess, chess.engine, chess.svg
 import pyrebase
-from streamlit.components.v1 import html
+import json
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="CheckmateAI", layout="wide")
 
-# ==================== SESSION STATE ====================
+# ==================== SESSION STATE DEFAULTS ====================
 def initialize_session_state():
     defaults = {
-        "board": chess.Board(),
-        "puzzle_board": chess.Board(),
-        "engine_ms": 600,
-        "user_elo": 1200,
-        "user_logged_in": False,
-        "username": "",
-        "user_info": None,
-        "solved_puzzles": set(),
-        "puzzle": None,
-        "worker": None,
+        "board": chess.Board(), "history": [], "engine_ms": 600, "user_elo": 1200,
+        "puzzle": None, "puzzle_board": chess.Board(), "last_analysis": None,
+        "puzzle_result": "", "selected_square": None, "user_logged_in": False,
+        "username": "", "user_info": None, "solved_puzzles": set(),
+        "play_move_input": "", "puzzle_move_input": ""
     }
     for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+        if k not in st.session_state: st.session_state[k] = v
 
 initialize_session_state()
 
@@ -37,7 +32,7 @@ def init_firebase():
         firebase_config = st.secrets["firebase_credentials"]
         return pyrebase.initialize_app(firebase_config)
     except Exception as e:
-        st.error(f"Firebase init failed: {e}")
+        st.error(f"Firebase initialization failed: {e}")
         return None
 
 firebase = init_firebase()
@@ -48,8 +43,7 @@ db = firebase.database() if firebase else None
 def login_page():
     st.subheader("Login / Register")
     if not auth or not db:
-        st.error("Firebase not initialized.")
-        st.stop()
+        st.error("Firebase not initialized."); st.stop()
     
     col1, col2 = st.columns(2)
     with col1:
@@ -65,29 +59,47 @@ def login_page():
                 user_data = db.child("users").child(user['localId']).get().val()
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
-                    st.session_state.solved_puzzles = set(user_data.get("solved_puzzles", []))
-                else:
+                    solved_puzzles_list = user_data.get("solved_puzzles", [])
+                    st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
+                else: 
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
-                st.success("Login successful!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Login failed: {e}")
+                st.success("Login successful!"); st.rerun()
+            except requests.exceptions.HTTPError as e:
+                error_data = e.args[1] if len(e.args) > 1 else "{}"
+                try:
+                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
+                except json.JSONDecodeError:
+                     error_message = "INVALID_CREDENTIALS"
+                st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
+            except Exception:
+                st.error("An unexpected error occurred during login.")
 
     with col2:
         st.subheader("Register")
         reg_email = st.text_input("Email", key="reg_email")
-        reg_password = st.text_input("Password", type="password", key="reg_pass")
+        reg_password = st.text_input("New Password", type="password", key="reg_pass")
         if st.button("Register"):
             try:
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
-            except Exception as e:
-                st.error(f"Registration failed: {e}")
+            except requests.exceptions.HTTPError as e:
+                error_data = e.args[1] if len(e.args) > 1 else "{}"
+                try:
+                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
+                except json.JSONDecodeError:
+                    error_message = "INVALID_EMAIL_OR_PASSWORD"
+                st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
+            except Exception:
+                st.error("An unexpected error occurred during registration.")
 
+
+# ==================== APP EXECUTION FLOW ====================
 if not st.session_state.user_logged_in:
     login_page()
     st.stop()
+
+# --- From here, the code runs only after a successful login ---
 
 # ==================== ENGINE SETUP ====================
 @st.cache_resource
@@ -99,148 +111,193 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
                 eng = chess.engine.SimpleEngine.popen_uci(cand, setpgrp=True)
                 try: eng.configure({"Threads": 1, "Hash": 64})
                 except chess.engine.EngineError: pass
-                engine, chosen = eng, cand
-                logs.append(f"✓ Engine started: {cand}")
-                break
+                engine, chosen = eng, cand; logs.append(f"✓ Engine started: {cand}"); break
             except Exception as e:
-                logs.append(f"✗ Failed: {cand} ({e})")
+                logs.append(f"✗ Failed to start: {cand} ({e})")
     if engine is None: logs.append("No usable Stockfish binary found.")
     return engine, chosen, logs
 
 class EngineWorker:
     def __init__(self, engine: chess.engine.SimpleEngine): self.engine = engine
     def analyse(self, board: chess.Board, multipv: int, think_ms: int) -> List[chess.engine.InfoDict]:
-        limit = chess.engine.Limit(time=max(0.05, think_ms/1000))
+        limit = chess.engine.Limit(time=max(0.05, think_ms / 1000.0))
         return self.engine.analyse(board, limit=limit, multipv=multipv)
     def play(self, board: chess.Board, think_ms: int) -> Optional[chess.Move]:
-        limit = chess.engine.Limit(time=max(0.05, think_ms/1000))
+        limit = chess.engine.Limit(time=max(0.05, think_ms / 1000.0))
         try: return self.engine.play(board, limit).move
         except chess.engine.EngineTerminatedError: return None
 
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
 st.session_state.worker = EngineWorker(engine) if engine else None
 
+# ==================== PUZZLE DATABASE ====================
+@st.cache_resource(show_spinner="Connecting to puzzle database...")
+def get_puzzle_db_path(puzzle_db_path: str = "puzzles.db"):
+    if not os.path.exists(puzzle_db_path):
+        with st.spinner("Puzzle database not found. Downloading..."):
+            db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
+            try:
+                r = requests.get(db_url, stream=True); r.raise_for_status()
+                with open(puzzle_db_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+                st.success("Puzzle database downloaded.")
+            except requests.exceptions.RequestException as e:
+                st.error(f"Failed to download puzzle database: {e}"); return None
+    return puzzle_db_path
+
+puzzle_db_path = get_puzzle_db_path()
+
+def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[str, Any]]:
+    if not puzzle_db_path: return None
+    conn = sqlite3.connect(puzzle_db_path)
+    try:
+        placeholders = ','.join('?' for _ in solved_ids) if solved_ids else '""'
+        query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1"
+        params = list(solved_ids) + [target_elo - 150, target_elo + 150]
+        cursor = conn.execute(query, params)
+        columns = [d[0] for d in cursor.description]
+        row = cursor.fetchone()
+        if row: return dict(zip(columns, row))
+        st.warning("No new puzzles in range. Loading a random one.")
+        fallback_query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) ORDER BY RANDOM() LIMIT 1"
+        cursor = conn.execute(fallback_query, list(solved_ids))
+        row = cursor.fetchone()
+        if row: return dict(zip(columns, row))
+    finally:
+        if conn: conn.close()
+    return None
+
 # ==================== HELPERS ====================
-def pretty_score(info, board):
-    sc = info.get("score")
-    pov = sc.pov(board.turn) if sc else None
+def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
+    sc = info.get("score"); pov = sc.pov(board.turn) if sc else None
     if pov is None: return "?"
     if pov.is_mate(): return f"M{pov.mate()}" if pov.mate() is not None else "M?"
     return f"{pov.score()} cp"
 
-def pv_to_san_line(board, pv, n=6):
-    b = board.copy()
-    out = []
+def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
+    b = board.copy(); parts = []
     for m in pv[:n]:
-        try: out.append(b.san(m)); b.push(m)
+        try: parts.append(b.san(m)); b.push(m)
         except: break
-    return " ".join(out)
+    return " ".join(parts)
 
-# ==================== APP UI ====================
+# ==================== BOARD RENDER ====================
+def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
+    legal_moves_for_selected = []
+    if st.session_state.selected_square is not None:
+        legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
+    
+    svg = chess.svg.board(
+        board, size=size, lastmove=board.peek() if board.move_stack else None,
+        check=board.king(board.turn) if board.is_check() else None,
+        squares=chess.SquareSet(legal_moves_for_selected + ([st.session_state.selected_square] if st.session_state.selected_square is not None else []))
+    )
+    st.image(svg, width=size)
+    
+    move_input_key = f"{key_prefix}_move_input"
+    st.text_input("Move (UCI format)", st.session_state.get(move_input_key, ""), key=move_input_key, placeholder="Click squares or type move...")
+    
+    cols = st.columns(8)
+    for i in range(8):
+        with cols[i]:
+            for j in range(8):
+                square = chess.square(i, 7 - j)
+                if st.button(" ", key=f"{key_prefix}_btn_{square}", help=chess.SQUARE_NAMES[square]):
+                    if st.session_state.selected_square is None:
+                        st.session_state.selected_square = square
+                        st.session_state[move_input_key] = chess.SQUARE_NAMES[square]
+                    else:
+                        from_sq = chess.SQUARE_NAMES[st.session_state.selected_square]
+                        to_sq = chess.SQUARE_NAMES[square]
+                        st.session_state[move_input_key] = f"{from_sq}{to_sq}"
+                        st.session_state.selected_square = None
+
+    if st.button("Make Move", key=f"{key_prefix}_move_btn"):
+        try:
+            move = board.parse_uci(st.session_state[move_input_key])
+            if move in board.legal_moves:
+                st.session_state[move_input_key] = ""; return move
+            else: st.warning("Illegal move.")
+        except ValueError:
+            st.warning("Invalid move format.")
+    return None
+
+# ==================== APP UI (LOGGED IN) ====================
 st.sidebar.title("CheckmateAI")
-board_size = st.sidebar.slider("Board Size", 280, 600, 420, step=20)
+board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
 st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
 st.sidebar.write(f"ELO: **{st.session_state.user_elo}**")
 if st.sidebar.button("Logout"):
-    st.session_state.clear()
-    initialize_session_state()
-    st.rerun()
+    st.session_state.clear(); initialize_session_state(); st.rerun()
+with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
+    st.write(f"Python: {sys.version.split()[0]}"); st.write(f"Chosen engine: {engine_path or '(none)'}")
+    for line in engine_logs: st.write(line)
 
-with st.sidebar.expander("Diagnostics", expanded=(engine is None)):
-    st.write(f"Python: {sys.version.split()[0]}")
-    st.write(f"Engine: {engine_path or '(none)'}")
-    for l in engine_logs: st.write(l)
+TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
-TAB_PLAY, TAB_PUZZLE, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
-
-# ==================== Helper: Render Chessboard.JS ====================
-def render_chessboard(board_fen: str, key: str):
-    js_code = f"""
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-    <div id="board_{key}" style="width: {board_size}px"></div>
-    <script>
-    var board_{key} = Chessboard('board_{key}', {{
-        draggable: true,
-        position: '{board_fen}',
-        onDrop: function(source, target) {{
-            const move = source + target;
-            fetch("/?move_{key}=" + move).then(() => location.reload());
-        }}
-    }});
-    </script>
-    """
-    html(js_code, height=board_size + 50)
-
-# ==================== Play vs AI ====================
 with TAB_PLAY:
-    st.subheader("Play vs AI")
-    render_chessboard(st.session_state.board.fen(), "play")
-    
-    move_param = st.experimental_get_query_params().get("move_play")
-    if move_param:
-        try:
-            uci_move = move_param[0]
-            m = chess.Move.from_uci(uci_move)
-            if m in st.session_state.board.legal_moves:
-                st.session_state.board.push(m)
-                if st.session_state.worker and not st.session_state.board.is_game_over():
+    col1, col2 = st.columns([1.7, 1])
+    with col1:
+        st.subheader("Play vs AI")
+        move = render_board_with_mouse(st.session_state.board, size=board_size, key_prefix="play")
+        if move:
+            st.session_state.board.push(move)
+            if st.session_state.worker and not st.session_state.board.is_game_over():
+                with st.spinner("AI is thinking..."):
                     ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
-                    if ai_move:
-                        st.session_state.board.push(ai_move)
-                st.experimental_rerun()
-        except Exception:
-            st.warning("Illegal move.")
-    
-    st.text_area("Moves",
-                 value=" ".join([st.session_state.board.san(m) for m in st.session_state.board.move_stack]),
-                 height=150, disabled=True)
+                if ai_move: st.session_state.board.push(ai_move)
+            st.rerun()
+    with col2:
+        st.subheader("Info")
+        san_history = [st.session_state.board.san(m) for m in st.session_state.board.move_stack]
+        st.text_area("Moves", value=" ".join(san_history), height=150, disabled=True)
+        if st.session_state.board.is_game_over(): st.info(f"Game over: {st.session_state.board.result()}")
+        if st.session_state.worker:
+            infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
+            for i, info in enumerate(infos, 1):
+                st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
 
-    if st.session_state.board.is_game_over():
-        st.info(f"Game over: {st.session_state.board.result()}")
-    if st.session_state.worker:
-        infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
-        for i, info in enumerate(infos, 1):
-            st.write(f"{i}. {pv_to_san_line(st.session_state.board, info.get('pv', []), 6)} ({pretty_score(info, st.session_state.board)})")
-
-# ==================== Puzzle ====================
-with TAB_PUZZLE:
-    st.subheader("Puzzle")
-    if not st.session_state.puzzle:
-        # 예시 퍼즐 (실제 DB에서 가져와도 됨)
-        st.session_state.puzzle_board.set_fen("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3")
-        st.session_state.puzzle = st.session_state.puzzle_board.copy()
-    
-    render_chessboard(st.session_state.puzzle_board.fen(), "puzzle")
-    
-    move_param = st.experimental_get_query_params().get("move_puzzle")
-    if move_param:
-        try:
-            uci_move = move_param[0]
-            m = chess.Move.from_uci(uci_move)
-            if m in st.session_state.puzzle_board.legal_moves:
-                st.session_state.puzzle_board.push(m)
-                # 단순 검증: 마지막 move가 checkmate이면 성공
-                if st.session_state.puzzle_board.is_checkmate():
-                    st.success("Puzzle solved!")
-                    st.session_state.solved_puzzles.add(st.session_state.puzzle_board.fen())
-                    st.session_state.user_elo += 10
-                    db.child("users").child(st.session_state.user_info['localId']).update({
-                        "elo": st.session_state.user_elo,
-                        "solved_puzzles": list(st.session_state.solved_puzzles)
-                    })
-                st.experimental_rerun()
+with TAB_PUZZLES:
+    st.subheader("Rating-based Puzzle")
+    if st.session_state.puzzle_result:
+        st.success(st.session_state.puzzle_result) if "Correct" in st.session_state.puzzle_result else st.error(st.session_state.puzzle_result)
+    if st.button("Load New Puzzle"):
+        st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo, st.session_state.solved_puzzles)
+        st.session_state.puzzle_result = ""
+        if st.session_state.puzzle:
+            st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
+        st.rerun()
+    if st.session_state.puzzle:
+        pz = st.session_state.puzzle
+        st.info(f"Your color: {'White' if st.session_state.puzzle_board.turn else 'Black'}")
+        move_obj = render_board_with_mouse(st.session_state.puzzle_board, size=board_size, key_prefix="puzzle")
+        if move_obj and db:
+            solution_move_uci = pz['moves'].split()[0]
+            user_id = st.session_state.user_info['localId']
+            if move_obj.uci() == solution_move_uci:
+                st.session_state.user_elo += 20
+                st.session_state.puzzle_result = "✅ Correct! +20 ELO"
+                st.session_state.solved_puzzles.add(pz['puzzle_id'])
             else:
-                st.warning("Illegal move.")
-        except Exception:
-            st.warning("Invalid move.")
+                st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
+                st.session_state.puzzle_result = f"❌ Incorrect. The move was {solution_move_uci}"
+            db.child("users").child(user_id).update({"elo": st.session_state.user_elo, "solved_puzzles": list(st.session_state.solved_puzzles)})
+            st.session_state.puzzle = None 
+            st.rerun()
 
-# ==================== Analysis ====================
 with TAB_ANALYSIS:
-    st.subheader("Analysis")
-    render_chessboard(st.session_state.board.fen(), "analysis")
-    if st.session_state.worker:
-        infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
-        for i, info in enumerate(infos, 1):
-            st.write(f"{i}. PV: {pv_to_san_line(st.session_state.board, info.get('pv', []), 6)} | Score: {pretty_score(info, st.session_state.board)}")
+    st.subheader("Position Analysis")
+    fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
+    if fen_to_analyze:
+        try:
+            board_to_analyze = chess.Board(fen_to_analyze)
+            st.image(chess.svg.board(board_to_analyze, size=board_size))
+            if st.button("Analyze Position", key="analyze_btn"):
+                if st.session_state.worker:
+                    with st.spinner("Analyzing..."):
+                        infos = st.session_state.worker.analyse(board_to_analyze, 5, 2000)
+                    for i, info in enumerate(infos, 1):
+                        st.write(f"{i}. **{pv_to_san_line(board_to_analyze, info.get('pv', []), 8)}** `({pretty_score(info, board_to_analyze)})`")
+        except ValueError:
+            st.error("Invalid FEN string.")
