@@ -61,7 +61,10 @@ def login_page():
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
                     st.session_state.solved_puzzles = set(solved_puzzles_list if isinstance(solved_puzzles_list, list) else [])
                 else:
-                    db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
+                    try:
+                        db.child("users").child(user['localId']).set({"email": email, "elo": 1200, "solved_puzzles": []})
+                    except Exception as e:
+                        st.error(f"Failed to create user in DB: {e}")
                 st.success("Login successful!"); st.rerun()
             except Exception as e:
                 st.error(f"Login failed: {e}")
@@ -73,7 +76,10 @@ def login_page():
         if st.button("Register"):
             try:
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
-                db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
+                try:
+                    db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200, "solved_puzzles": []})
+                except Exception as e:
+                    st.error(f"Failed to create user in DB: {e}")
                 st.success("Registration successful! Please login.")
             except Exception as e:
                 st.error(f"Registration failed: {e}")
@@ -166,30 +172,18 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 # ==================== BOARD RENDER (SAN + UCI) ====================
 def render_board_text_only(board: chess.Board, key_prefix: str = "play"):
     move_input_key = f"{key_prefix}_move_input"
-    
-    # 세션 상태가 비어있으면 초기값 설정
     move_input = st.session_state.get(move_input_key, "")
-
-    # 텍스트 입력
     move_input_new = st.text_input("Enter Move (SAN or UCI, e.g., e4 or e2e4):", value=move_input, key=f"{move_input_key}_tmp")
-
-    # 버튼 눌렀을 때만 세션 상태를 갱신
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         move = None
-        try:
-            move = board.parse_san(move_input_new)
+        try: move = board.parse_san(move_input_new)
         except ValueError:
-            try:
-                move = board.parse_uci(move_input_new)
-            except ValueError:
-                st.warning("Invalid move format.")
+            try: move = board.parse_uci(move_input_new)
+            except ValueError: st.warning("Invalid move format.")
         if move and move in board.legal_moves:
-            st.session_state[move_input_key] = ""  # 버튼 클릭 후 초기화
+            st.session_state[move_input_key] = ""
             return move
-        elif move:
-            st.warning("Illegal move.")
-    
-    # 버튼 안 누르면 세션 상태 유지
+        elif move: st.warning("Illegal move.")
     st.session_state[move_input_key] = move_input_new
     st.image(chess.svg.board(board, size=420))
     return None
@@ -249,15 +243,22 @@ with TAB_PUZZLES:
         if move_obj and db:
             solution_move_uci = pz['moves'].split()[0]
             user_id = st.session_state.user_info['localId']
-            if move_obj.uci() == solution_move_uci:
-                st.session_state.user_elo += 20
-                st.session_state.puzzle_result = "✅ Correct! +20 ELO"
-                st.session_state.solved_puzzles.add(pz['puzzle_id'])
-            else:
-                st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
-                st.session_state.puzzle_result = f"❌ Incorrect. The move was {solution_move_uci}"
-            db.child("users").child(user_id).update({"elo": st.session_state.user_elo, "solved_puzzles": list(st.session_state.solved_puzzles)})
-            st.session_state.puzzle = None 
+            try:
+                solved_list = list(st.session_state.solved_puzzles) if st.session_state.solved_puzzles else []
+                if move_obj.uci() == solution_move_uci:
+                    st.session_state.user_elo += 20
+                    st.session_state.puzzle_result = "✅ Correct! +20 ELO"
+                    st.session_state.solved_puzzles.add(pz['puzzle_id'])
+                else:
+                    st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
+                    st.session_state.puzzle_result = f"❌ Incorrect. The move was {solution_move_uci}"
+                # 안전하게 update
+                db.child("users").child(user_id).update({"elo": st.session_state.user_elo, "solved_puzzles": solved_list})
+            except requests.exceptions.HTTPError as e:
+                st.error(f"Failed to update DB: {e}")
+            except Exception as e:
+                st.error(f"Unexpected DB error: {e}")
+            st.session_state.puzzle = None
             st.rerun()
 
 # ==================== TAB: ANALYSIS ====================
