@@ -44,6 +44,7 @@ def login_page():
     st.subheader("Login / Register")
     if not auth or not db:
         st.error("Firebase not initialized."); st.stop()
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Login")
@@ -58,18 +59,17 @@ def login_page():
                 user_data = db.child("users").child(user['localId']).get().val()
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
-                    st.session_state.solved_puzzles = set(user_data.get("solved_puzzles", []))
-                else:
-                    db.child("users").child(user['localId']).set({"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
+                    solved_puzzles_list = user_data.get("solved_puzzles", [])
+                    st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
+                else: # First-time login, create a user profile
+                    db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
-            except Exception as e:
-                try:
-                    # Firebase 에러 메시지를 파싱하여 사용자에게 보여줌
-                    error_json = e.args[1]
-                    error_message = json.loads(error_json)['error']['message']
-                    st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
-                except (IndexError, KeyError, json.JSONDecodeError):
-                    st.error("Login failed: Invalid credentials.")
+            except requests.exceptions.HTTPError as e:
+                error_data = e.response.json()
+                error_message = error_data.get("error", {}).get("message", "UNKNOWN_ERROR")
+                st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
+            except Exception:
+                st.error("An unexpected error occurred during login.")
 
     with col2:
         st.subheader("Register")
@@ -78,16 +78,14 @@ def login_page():
         if st.button("Register"):
             try:
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
-                db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200, "solved_puzzles": ["dummy_id"]})
+                db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
-            except Exception as e:
-                try:
-                    # Firebase 에러 메시지를 파싱하여 사용자에게 보여줌
-                    error_json = e.args[1]
-                    error_message = json.loads(error_json)['error']['message']
-                    st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
-                except (IndexError, KeyError, json.JSONDecodeError):
-                    st.error("Registration failed: Invalid email or password.")
+            except requests.exceptions.HTTPError as e:
+                error_data = e.response.json()
+                error_message = error_data.get("error", {}).get("message", "UNKNOWN_ERROR")
+                st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
+            except Exception:
+                st.error("An unexpected error occurred during registration.")
 
 
 # ==================== APP EXECUTION FLOW ====================
@@ -100,6 +98,7 @@ if not st.session_state.user_logged_in:
 # ==================== ENGINE SETUP ====================
 @st.cache_resource
 def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine], Optional[str], List[str]]:
+    # ... (Engine setup logic, no changes)
     logs, engine, chosen = [], None, None
     for cand in ["/usr/games/stockfish", shutil.which("stockfish")]:
         if cand and os.path.exists(cand):
@@ -107,14 +106,14 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
                 eng = chess.engine.SimpleEngine.popen_uci(cand, setpgrp=True)
                 try: eng.configure({"Threads": 1, "Hash": 64})
                 except chess.engine.EngineError: pass
-                engine, chosen = eng, cand
-                logs.append(f"✓ Engine started: {cand}"); break
+                engine, chosen = eng, cand; logs.append(f"✓ Engine started: {cand}"); break
             except Exception as e:
                 logs.append(f"✗ Failed to start: {cand} ({e})")
     if engine is None: logs.append("No usable Stockfish binary found.")
     return engine, chosen, logs
 
 class EngineWorker:
+    # ... (EngineWorker class, no changes)
     def __init__(self, engine: chess.engine.SimpleEngine): self.engine = engine
     def analyse(self, board: chess.Board, multipv: int, think_ms: int) -> List[chess.engine.InfoDict]:
         limit = chess.engine.Limit(time=max(0.05, think_ms / 1000.0))
@@ -129,7 +128,8 @@ st.session_state.worker = EngineWorker(engine) if engine else None
 
 # ==================== PUZZLE DATABASE ====================
 @st.cache_resource(show_spinner="Connecting to puzzle database...")
-def get_puzzle_db_conn(puzzle_db_path: str = "puzzles.db"):
+def get_puzzle_db_path(puzzle_db_path: str = "puzzles.db"):
+    # ... (Puzzle DB download logic, no changes)
     if not os.path.exists(puzzle_db_path):
         with st.spinner("Puzzle database not found. Downloading..."):
             db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
@@ -142,9 +142,10 @@ def get_puzzle_db_conn(puzzle_db_path: str = "puzzles.db"):
                 st.error(f"Failed to download puzzle database: {e}"); return None
     return puzzle_db_path
 
-puzzle_db_path = get_puzzle_db_conn()
+puzzle_db_path = get_puzzle_db_path()
 
 def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[str, Any]]:
+    # ... (Puzzle fetching logic, no changes)
     if not puzzle_db_path: return None
     conn = sqlite3.connect(puzzle_db_path)
     try:
@@ -152,10 +153,10 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
         query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1"
         params = list(solved_ids) + [target_elo - 150, target_elo + 150]
         cursor = conn.execute(query, params)
-        columns = [description[0] for description in cursor.description]
+        columns = [d[0] for d in cursor.description]
         row = cursor.fetchone()
         if row: return dict(zip(columns, row))
-        st.warning("No new puzzles found in your ELO range. Loading a random one.")
+        st.warning("No new puzzles in range. Loading a random one.")
         fallback_query = f"SELECT * FROM puzzles WHERE puzzle_id NOT IN ({placeholders}) ORDER BY RANDOM() LIMIT 1"
         cursor = conn.execute(fallback_query, list(solved_ids))
         row = cursor.fetchone()
@@ -166,6 +167,7 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
 
 # ==================== HELPERS ====================
 def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
+    # ... (Helper functions, no changes)
     sc = info.get("score"); pov = sc.pov(board.turn) if sc else None
     if pov is None: return "?"
     if pov.is_mate(): return f"M{pov.mate()}" if pov.mate() is not None else "M?"
@@ -180,6 +182,7 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 
 # ==================== BOARD RENDER ====================
 def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
+    # ... (Board rendering, no changes)
     legal_moves_for_selected = []
     if st.session_state.selected_square is not None:
         legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
@@ -213,8 +216,7 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
         try:
             move = board.parse_uci(st.session_state[move_input_key])
             if move in board.legal_moves:
-                st.session_state[move_input_key] = ""
-                return move
+                st.session_state[move_input_key] = ""; return move
             else: st.warning("Illegal move.")
         except ValueError:
             st.warning("Invalid move format.")
@@ -233,7 +235,9 @@ with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
     for line in engine_logs: st.write(line)
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
+
 with TAB_PLAY:
+    # ... (Play Tab UI, no changes)
     col1, col2 = st.columns([1.7, 1])
     with col1:
         st.subheader("Play vs AI")
@@ -256,6 +260,7 @@ with TAB_PLAY:
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
 
 with TAB_PUZZLES:
+    # ... (Puzzle Tab UI, no changes)
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
         st.success(st.session_state.puzzle_result) if "Correct" in st.session_state.puzzle_result else st.error(st.session_state.puzzle_result)
@@ -284,6 +289,7 @@ with TAB_PUZZLES:
             st.rerun()
 
 with TAB_ANALYSIS:
+    # ... (Analysis Tab UI, no changes)
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
     if fen_to_analyze:
