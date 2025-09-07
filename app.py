@@ -91,15 +91,15 @@ def get_db_conn(db_path: str = "puzzles.db"):
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
                 
-                temp_conn = sqlite3.connect(temp_db_path)
-                df = pd.read_sql_query("SELECT * FROM puzzles", temp_conn)
-                df.to_sql("puzzles", conn, if_exists="replace", index=False)
+                # Attach the downloaded database and copy data without loading into memory
+                c.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_db")
+                c.execute("CREATE TABLE puzzles AS SELECT * FROM temp_db.puzzles")
                 conn.commit()
-                temp_conn.close()
+                c.execute("DETACH DATABASE temp_db")
+                
                 os.remove(temp_db_path)
                 st.success("Puzzle database downloaded and integrated.")
-                st.rerun()
-
+                # We don't call rerun here to let the script finish gracefully
             except requests.exceptions.RequestException as e:
                 st.error(f"Failed to download puzzle database: {e}")
                 if os.path.exists(temp_db_path): os.remove(temp_db_path)
@@ -119,7 +119,9 @@ def get_puzzle_near_rating(target_elo: int) -> Optional[Dict[str, Any]]:
             "SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE puzzle_id NOT IN (SELECT puzzle_id FROM solved_puzzles) AND rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1",
             (target_elo - 100, target_elo + 100)
         ).fetchone()
-        if not row: return None
+        if not row: 
+            st.warning("No new puzzles in this ELO range. Try a different range or reset progress.")
+            return None
         return dict(zip(["puzzle_id", "fen", "moves", "rating"], row))
     except sqlite3.OperationalError as e:
         st.error(f"Database error while fetching puzzle: {e}")
@@ -190,7 +192,7 @@ def render_board_and_handle_clicks(board: chess.Board, size: int = 400, key_pref
             else:
                 st.session_state.selected_square = square if board.piece_at(square) else None
         else:
-            if board.piece_at(square) is not None:
+            if board.piece_at(square) is not None and board.piece_at(square).color == board.turn:
                  st.session_state.selected_square = square
 
     return None
@@ -200,7 +202,7 @@ def login_page():
     st.subheader("Login / Register")
     conn = get_db_conn()
     if not conn:
-        st.error("Database connection failed. Please refresh.")
+        st.error("Database connection failed. The app might be busy initializing. Please wait a moment and refresh.")
         st.stop()
         
     c = conn.cursor()
@@ -245,8 +247,7 @@ if st.session_state.user_logged_in:
     st.sidebar.write(f"Logged in as: {st.session_state.username}")
     st.sidebar.write(f"ELO: {st.session_state.user_elo}")
     if st.sidebar.button("Logout"):
-        for key in list(session_defaults.keys()):
-            st.session_state[key] = session_defaults[key]
+        st.session_state.clear()
         st.rerun()
 
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
