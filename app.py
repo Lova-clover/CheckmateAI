@@ -166,19 +166,31 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 # ==================== BOARD RENDER (SAN + UCI) ====================
 def render_board_text_only(board: chess.Board, key_prefix: str = "play"):
     move_input_key = f"{key_prefix}_move_input"
-    move_input = st.text_input("Enter Move (SAN or UCI, e.g., e4 or e2e4):", st.session_state.get(move_input_key, ""), key=move_input_key)
+    
+    # 세션 상태가 비어있으면 초기값 설정
+    move_input = st.session_state.get(move_input_key, "")
+
+    # 텍스트 입력
+    move_input_new = st.text_input("Enter Move (SAN or UCI, e.g., e4 or e2e4):", value=move_input, key=f"{move_input_key}_tmp")
+
+    # 버튼 눌렀을 때만 세션 상태를 갱신
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         move = None
-        try: move = board.parse_san(move_input)
+        try:
+            move = board.parse_san(move_input_new)
         except ValueError:
-            try: move = board.parse_uci(move_input)
+            try:
+                move = board.parse_uci(move_input_new)
             except ValueError:
                 st.warning("Invalid move format.")
         if move and move in board.legal_moves:
-            st.session_state[move_input_key] = ""
+            st.session_state[move_input_key] = ""  # 버튼 클릭 후 초기화
             return move
         elif move:
             st.warning("Illegal move.")
+    
+    # 버튼 안 누르면 세션 상태 유지
+    st.session_state[move_input_key] = move_input_new
     st.image(chess.svg.board(board, size=420))
     return None
 
