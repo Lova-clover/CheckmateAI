@@ -3,7 +3,6 @@ import os, sys, sqlite3, shutil
 from typing import Dict, Any, List, Tuple, Optional
 import requests
 import streamlit as st
-import pandas as pd
 import chess, chess.engine, chess.svg
 import pyrebase
 import json
@@ -53,7 +52,6 @@ def login_page():
         if st.button("Login"):
             try:
                 user = auth.sign_in_with_email_and_password(email, password)
-                # 로그인 성공 시만 세션 업데이트
                 st.session_state.user_logged_in = True
                 st.session_state.user_info = user
                 st.session_state.username = user['email']
@@ -61,19 +59,12 @@ def login_page():
                 if user_data:
                     st.session_state.user_elo = user_data.get("elo", 1200)
                     solved_puzzles_list = user_data.get("solved_puzzles", [])
-                    st.session_state.solved_puzzles = set(solved_puzzles_list if solved_puzzles_list and isinstance(solved_puzzles_list, list) else [])
+                    st.session_state.solved_puzzles = set(solved_puzzles_list if isinstance(solved_puzzles_list, list) else [])
                 else:
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
-            except requests.exceptions.HTTPError as e:
-                error_data = e.args[1] if len(e.args) > 1 else "{}"
-                try:
-                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
-                except json.JSONDecodeError:
-                    error_message = "INVALID_CREDENTIALS"
-                st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
-            except Exception:
-                st.error("An unexpected error occurred during login.")
+            except Exception as e:
+                st.error(f"Login failed: {e}")
 
     with col2:
         st.subheader("Register")
@@ -84,15 +75,8 @@ def login_page():
                 user = auth.create_user_with_email_and_password(reg_email, reg_password)
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
-            except requests.exceptions.HTTPError as e:
-                error_data = e.args[1] if len(e.args) > 1 else "{}"
-                try:
-                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
-                except json.JSONDecodeError:
-                    error_message = "INVALID_EMAIL_OR_PASSWORD"
-                st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
-            except Exception:
-                st.error("An unexpected error occurred during registration.")
+            except Exception as e:
+                st.error(f"Registration failed: {e}")
 
 # ==================== APP EXECUTION FLOW ====================
 if not st.session_state.user_logged_in:
@@ -179,24 +163,26 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-# ==================== BOARD RENDER (TEXT ONLY) ====================
+# ==================== BOARD RENDER (SAN + UCI) ====================
 def render_board_text_only(board: chess.Board, key_prefix: str = "play"):
     move_input_key = f"{key_prefix}_move_input"
-    move_uci = st.text_input("Enter Move (UCI format, e.g., e2e4):", st.session_state.get(move_input_key, ""), key=move_input_key)
+    move_input = st.text_input("Enter Move (SAN or UCI, e.g., e4 or e2e4):", st.session_state.get(move_input_key, ""), key=move_input_key)
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
-        try:
-            move = board.parse_uci(move_uci)
-            if move in board.legal_moves:
-                st.session_state[move_input_key] = ""
-                return move
-            else:
-                st.warning("Illegal move.")
+        move = None
+        try: move = board.parse_san(move_input)
         except ValueError:
-            st.warning("Invalid move format.")
+            try: move = board.parse_uci(move_input)
+            except ValueError:
+                st.warning("Invalid move format.")
+        if move and move in board.legal_moves:
+            st.session_state[move_input_key] = ""
+            return move
+        elif move:
+            st.warning("Illegal move.")
     st.image(chess.svg.board(board, size=420))
     return None
 
-# ==================== APP UI (LOGGED IN) ====================
+# ==================== APP UI ====================
 st.sidebar.title("CheckmateAI")
 board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
@@ -210,6 +196,7 @@ with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
+# ==================== TAB: PLAY ====================
 with TAB_PLAY:
     col1, col2 = st.columns([1.7, 1])
     with col1:
@@ -232,6 +219,7 @@ with TAB_PLAY:
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
 
+# ==================== TAB: PUZZLES ====================
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
@@ -260,6 +248,7 @@ with TAB_PUZZLES:
             st.session_state.puzzle = None 
             st.rerun()
 
+# ==================== TAB: ANALYSIS ====================
 with TAB_ANALYSIS:
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
