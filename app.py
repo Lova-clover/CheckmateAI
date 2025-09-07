@@ -3,7 +3,7 @@ import os, sys, sqlite3, shutil
 from typing import Dict, Any, List, Tuple, Optional
 import requests
 import streamlit as st
-import pandas as pd  
+import pandas as pd
 import chess, chess.engine, chess.svg
 import base64
 import pyrebase
@@ -17,7 +17,8 @@ def initialize_session_state():
         "board": chess.Board(), "history": [], "engine_ms": 600, "user_elo": 1200,
         "puzzle": None, "puzzle_board": chess.Board(), "last_analysis": None,
         "puzzle_result": "", "selected_square": None, "user_logged_in": False,
-        "username": "", "user_info": None, "solved_puzzles": set()
+        "username": "", "user_info": None, "solved_puzzles": set(),
+        "play_move_input": "", "puzzle_move_input": ""
     }
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
@@ -29,8 +30,7 @@ initialize_session_state()
 def init_firebase():
     try:
         firebase_config = st.secrets["firebase_credentials"]
-        firebase = pyrebase.initialize_app(firebase_config)
-        return firebase
+        return pyrebase.initialize_app(firebase_config)
     except Exception as e:
         st.error(f"Firebase initialization failed: {e}. Check your Streamlit Secrets.")
         return None
@@ -81,13 +81,12 @@ def get_puzzle_db_conn(puzzle_db_path: str = "puzzles.db"):
                 st.error(f"Failed to download puzzle database: {e}"); return None
     return sqlite3.connect(puzzle_db_path, check_same_thread=False)
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False)
 def get_puzzles_as_df():
     conn = get_puzzle_db_conn()
     if not conn: return None
     try:
-        df = pd.read_sql_query("SELECT puzzle_id, fen, moves, rating FROM puzzles", conn)
-        return df
+        return pd.read_sql_query("SELECT puzzle_id, fen, moves, rating FROM puzzles", conn)
     finally:
         if conn: conn.close()
 
@@ -99,10 +98,10 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
     elo_range_df = unsolved_df[(unsolved_df['rating'] >= target_elo - 150) & (unsolved_df['rating'] <= target_elo + 150)]
     if not elo_range_df.empty:
         return elo_range_df.sample(1).to_dict('records')[0]
-    st.warning("No new puzzles found in your ELO range. Loading a random one.")
+    st.warning("No new puzzles in your ELO range. Loading a random one.")
     if not unsolved_df.empty:
         return unsolved_df.sample(1).to_dict('records')[0]
-    st.info("You've solved all the puzzles! Resetting your progress for fun.")
+    st.info("You've solved all puzzles! Progress will be reset.")
     if db and st.session_state.user_info:
         db.child("users").child(st.session_state.user_info['localId']).child("solved_puzzles").remove()
     return puzzles_df.sample(1).to_dict('records')[0]
@@ -121,24 +120,22 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-# ==================== BOARD RENDER (IMPROVED MOUSE CLICK) ====================
+# ==================== BOARD RENDER (STABLE MOUSE CLICK) ====================
 def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
     legal_moves_for_selected = []
     if st.session_state.selected_square is not None:
         legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
     
     svg_data = chess.svg.board(
-        board, size=size,
-        lastmove=board.peek() if board.move_stack else None,
+        board, size=size, lastmove=board.peek() if board.move_stack else None,
         check=board.king(board.turn) if board.is_check() else None,
         squares=chess.SquareSet(legal_moves_for_selected + ([st.session_state.selected_square] if st.session_state.selected_square is not None else []))
     )
     st.image(svg_data, width=size)
     
-    # Text input to show and confirm the move
-    move_uci = st.text_input("Move (UCI format)", key=f"{key_prefix}_move_input", placeholder="Click squares or type move (e.g., e2e4)").lower()
+    move_input_key = f"{key_prefix}_move_input"
+    move_uci = st.text_input("Move (UCI format)", st.session_state.get(move_input_key, ""), key=move_input_key, placeholder="Click two squares or type move (e.g., e2e4)").lower()
     
-    # Grid of transparent buttons for clicking
     cols = st.columns(8)
     for i in range(8):
         with cols[i]:
@@ -148,17 +145,18 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
                 if st.button(" ", key=f"{key_prefix}_btn_{square_name}", help=square_name):
                     if st.session_state.selected_square is None:
                         st.session_state.selected_square = square
-                        st.session_state[f"{key_prefix}_move_input"] = square_name
+                        st.session_state[move_input_key] = square_name
                     else:
                         from_sq = chess.SQUARE_NAMES[st.session_state.selected_square]
-                        st.session_state[f"{key_prefix}_move_input"] = f"{from_sq}{square_name}"
+                        st.session_state[move_input_key] = f"{from_sq}{square_name}"
                         st.session_state.selected_square = None
-                    st.rerun()
+                    # REMOVED st.rerun() for stability
 
     if st.button("Make Move", key=f"{key_prefix}_move_btn"):
         try:
-            move = board.parse_uci(st.session_state[f"{key_prefix}_move_input"])
+            move = board.parse_uci(st.session_state[move_input_key])
             if move in board.legal_moves:
+                st.session_state[move_input_key] = "" # Clear input after move
                 return move
             else:
                 st.warning("Illegal move.")
@@ -168,11 +166,9 @@ def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str
 
 # ==================== FIREBASE LOGIN / REGISTER UI ====================
 def login_page():
-    # ... (Firebase login/register logic - no changes) ...
     st.subheader("Login / Register")
     if not auth or not db:
-        st.error("Firebase is not initialized. Cannot proceed.")
-        st.stop()
+        st.error("Firebase is not initialized. Cannot proceed."); st.stop()
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Login")
@@ -192,8 +188,7 @@ def login_page():
                 else:
                     new_user_data = {"email": email, "elo": 1200, "solved_puzzles": ["dummy_id"]}
                     db.child("users").child(user['localId']).set(new_user_data)
-                st.success("Login successful!")
-                st.rerun()
+                st.success("Login successful!"); st.rerun()
             except Exception:
                 st.error("Failed to login. Check your credentials.")
     with col2:
@@ -212,30 +207,21 @@ def login_page():
 # ==================== APP UI ====================
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
 st.session_state.worker = EngineWorker(engine) if engine else None
-
 st.sidebar.title("CheckmateAI")
 board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
-
 if st.session_state.user_logged_in:
     st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
     st.sidebar.write(f"ELO: **{st.session_state.user_elo}**")
     if st.sidebar.button("Logout"):
-        st.session_state.clear()
-        initialize_session_state()
-        st.rerun()
-
+        st.session_state.clear(); initialize_session_state(); st.rerun()
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
-    st.write(f"Python: {sys.version.split()[0]}")
-    st.write(f"Chosen engine: {engine_path or '(none)'}")
+    st.write(f"Python: {sys.version.split()[0]}"); st.write(f"Chosen engine: {engine_path or '(none)'}")
     for line in engine_logs: st.write(line)
-
 if not st.session_state.user_logged_in:
-    login_page()
-    st.stop()
+    login_page(); st.stop()
 
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
-
 with TAB_PLAY:
     st.subheader("Play vs AI")
     col1, col2 = st.columns([1.7, 1])
@@ -248,56 +234,43 @@ with TAB_PLAY:
                     ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
                 if ai_move: st.session_state.board.push(ai_move)
             st.rerun()
-            
     with col2:
         st.write("Move History")
         san_history = [st.session_state.board.san(m) for m in st.session_state.board.move_stack]
         st.text_area("Moves", value=" ".join(san_history), height=200, disabled=True)
-        if st.session_state.board.is_game_over():
-            st.info(f"Game over: {st.session_state.board.result()}")
+        if st.session_state.board.is_game_over(): st.info(f"Game over: {st.session_state.board.result()}")
         st.markdown("**Engine Analysis**")
         if st.session_state.worker:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
-
 with TAB_PUZZLES:
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
         st.success(st.session_state.puzzle_result) if "Correct" in st.session_state.puzzle_result else st.error(st.session_state.puzzle_result)
-    
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo, st.session_state.solved_puzzles)
         st.session_state.puzzle_result = ""
         if st.session_state.puzzle:
             st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
         st.rerun()
-
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
         st.info(f"Your color: {'White' if st.session_state.puzzle_board.turn else 'Black'}")
-        
         move_obj = render_board_with_mouse(st.session_state.puzzle_board, size=board_size, key_prefix="puzzle")
         if move_obj and db:
             solution_move_uci = pz['moves'].split()[0]
             user_id = st.session_state.user_info['localId']
-            
             if move_obj.uci() == solution_move_uci:
                 st.session_state.user_elo += 20
-                st.session_state.puzzle_result = f"✅ Correct! +20 ELO"
+                st.session_state.puzzle_result = "✅ Correct! +20 ELO"
                 st.session_state.solved_puzzles.add(pz['puzzle_id'])
             else:
                 st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
                 st.session_state.puzzle_result = f"❌ Incorrect. The move was {solution_move_uci}"
-            
-            db.child("users").child(user_id).update({
-                "elo": st.session_state.user_elo,
-                "solved_puzzles": list(st.session_state.solved_puzzles)
-            })
-            
+            db.child("users").child(user_id).update({"elo": st.session_state.user_elo, "solved_puzzles": list(st.session_state.solved_puzzles)})
             st.session_state.puzzle = None 
             st.rerun()
-
 with TAB_ANALYSIS:
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
