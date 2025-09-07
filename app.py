@@ -65,8 +65,12 @@ def login_page():
                     db.child("users").child(user['localId']).set({"email": email, "elo": 1200})
                 st.success("Login successful!"); st.rerun()
             except requests.exceptions.HTTPError as e:
-                error_data = e.response.json()
-                error_message = error_data.get("error", {}).get("message", "UNKNOWN_ERROR")
+                # Correctly parse the error from Pyrebase's HTTPError
+                error_data = e.args[1] if len(e.args) > 1 else "{}"
+                try:
+                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
+                except json.JSONDecodeError:
+                     error_message = "INVALID_CREDENTIALS"
                 st.error(f"Login failed: {error_message.replace('_', ' ').capitalize()}")
             except Exception:
                 st.error("An unexpected error occurred during login.")
@@ -81,8 +85,12 @@ def login_page():
                 db.child("users").child(user['localId']).set({"email": reg_email, "elo": 1200})
                 st.success("Registration successful! Please login.")
             except requests.exceptions.HTTPError as e:
-                error_data = e.response.json()
-                error_message = error_data.get("error", {}).get("message", "UNKNOWN_ERROR")
+                # Correctly parse the error from Pyrebase's HTTPError
+                error_data = e.args[1] if len(e.args) > 1 else "{}"
+                try:
+                    error_message = json.loads(error_data).get("error", {}).get("message", "UNKNOWN_ERROR")
+                except json.JSONDecodeError:
+                    error_message = "INVALID_EMAIL_OR_PASSWORD"
                 st.error(f"Registration failed: {error_message.replace('_', ' ').capitalize()}")
             except Exception:
                 st.error("An unexpected error occurred during registration.")
@@ -98,7 +106,6 @@ if not st.session_state.user_logged_in:
 # ==================== ENGINE SETUP ====================
 @st.cache_resource
 def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine], Optional[str], List[str]]:
-    # ... (Engine setup logic, no changes)
     logs, engine, chosen = [], None, None
     for cand in ["/usr/games/stockfish", shutil.which("stockfish")]:
         if cand and os.path.exists(cand):
@@ -113,7 +120,6 @@ def open_engine_with_diagnostics() -> Tuple[Optional[chess.engine.SimpleEngine],
     return engine, chosen, logs
 
 class EngineWorker:
-    # ... (EngineWorker class, no changes)
     def __init__(self, engine: chess.engine.SimpleEngine): self.engine = engine
     def analyse(self, board: chess.Board, multipv: int, think_ms: int) -> List[chess.engine.InfoDict]:
         limit = chess.engine.Limit(time=max(0.05, think_ms / 1000.0))
@@ -129,7 +135,6 @@ st.session_state.worker = EngineWorker(engine) if engine else None
 # ==================== PUZZLE DATABASE ====================
 @st.cache_resource(show_spinner="Connecting to puzzle database...")
 def get_puzzle_db_path(puzzle_db_path: str = "puzzles.db"):
-    # ... (Puzzle DB download logic, no changes)
     if not os.path.exists(puzzle_db_path):
         with st.spinner("Puzzle database not found. Downloading..."):
             db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
@@ -145,7 +150,6 @@ def get_puzzle_db_path(puzzle_db_path: str = "puzzles.db"):
 puzzle_db_path = get_puzzle_db_path()
 
 def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[str, Any]]:
-    # ... (Puzzle fetching logic, no changes)
     if not puzzle_db_path: return None
     conn = sqlite3.connect(puzzle_db_path)
     try:
@@ -167,7 +171,6 @@ def get_puzzle_near_rating(target_elo: int, solved_ids: set) -> Optional[Dict[st
 
 # ==================== HELPERS ====================
 def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
-    # ... (Helper functions, no changes)
     sc = info.get("score"); pov = sc.pov(board.turn) if sc else None
     if pov is None: return "?"
     if pov.is_mate(): return f"M{pov.mate()}" if pov.mate() is not None else "M?"
@@ -182,7 +185,6 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
 
 # ==================== BOARD RENDER ====================
 def render_board_with_mouse(board: chess.Board, size: int = 400, key_prefix: str = "play"):
-    # ... (Board rendering, no changes)
     legal_moves_for_selected = []
     if st.session_state.selected_square is not None:
         legal_moves_for_selected = [m.to_square for m in board.legal_moves if m.from_square == st.session_state.selected_square]
@@ -237,7 +239,6 @@ with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
 with TAB_PLAY:
-    # ... (Play Tab UI, no changes)
     col1, col2 = st.columns([1.7, 1])
     with col1:
         st.subheader("Play vs AI")
@@ -260,7 +261,6 @@ with TAB_PLAY:
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv', []), 6)}** `({pretty_score(info, st.session_state.board)})`")
 
 with TAB_PUZZLES:
-    # ... (Puzzle Tab UI, no changes)
     st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
         st.success(st.session_state.puzzle_result) if "Correct" in st.session_state.puzzle_result else st.error(st.session_state.puzzle_result)
@@ -289,7 +289,6 @@ with TAB_PUZZLES:
             st.rerun()
 
 with TAB_ANALYSIS:
-    # ... (Analysis Tab UI, no changes)
     st.subheader("Position Analysis")
     fen_to_analyze = st.text_input("FEN String", st.session_state.board.fen())
     if fen_to_analyze:
