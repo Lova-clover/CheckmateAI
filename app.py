@@ -5,22 +5,28 @@ import requests
 import streamlit as st
 import pandas as pd
 import chess, chess.engine, chess.svg
-import io
-import base64
-from PIL import Image
+import io, base64
+from hashlib import sha256
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="CheckmateAI", layout="wide")
 
-# ==================== SESSION STATE ====================
-if "board" not in st.session_state: st.session_state.board = chess.Board()
-if "history" not in st.session_state: st.session_state.history = []
-if "engine_ms" not in st.session_state: st.session_state.engine_ms = 600
-if "user_elo" not in st.session_state: st.session_state.user_elo = 1200
-if "puzzle" not in st.session_state: st.session_state.puzzle = None
-if "puzzle_board" not in st.session_state: st.session_state.puzzle_board = chess.Board()
-if "last_analysis" not in st.session_state: st.session_state.last_analysis = None
-if "puzzle_result" not in st.session_state: st.session_state.puzzle_result = ""
+# ==================== SESSION STATE DEFAULTS ====================
+session_defaults = {
+    "board": chess.Board(),
+    "history": [],
+    "engine_ms": 600,
+    "user_elo": 1200,
+    "puzzle": None,
+    "puzzle_board": chess.Board(),
+    "last_analysis": None,
+    "puzzle_result": "",
+    "selected_from": None,
+    "user_logged_in": False,
+    "username": ""
+}
+for k, v in session_defaults.items():
+    if k not in st.session_state: st.session_state[k] = v
 
 # ==================== ENGINE SETUP ====================
 def _engine_candidates() -> list[str]:
@@ -57,17 +63,25 @@ class EngineWorker:
 # ==================== DATABASE ====================
 @st.cache_resource(show_spinner="Connecting to puzzle database...")
 def get_db_conn(db_path: str = "puzzles.db"):
-    if not os.path.exists(db_path):
+    need_download = not os.path.exists(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS solved_puzzles (puzzle_id TEXT PRIMARY KEY)")
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY, 
+                    password_hash TEXT, 
+                    elo INTEGER DEFAULT 1200
+                )""")
+    conn.commit()
+    if need_download:
         db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
         try:
             r = requests.get(db_url, stream=True); r.raise_for_status()
             with open(db_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
         except requests.exceptions.RequestException as e:
-            st.error(f"Failed to download puzzle database: {e}"); return None
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.execute("CREATE TABLE IF NOT EXISTS solved_puzzles (puzzle_id TEXT PRIMARY KEY)")
-    conn.commit()
+            st.error(f"Failed to download puzzle database: {e}")
+            return None
     return conn
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -80,6 +94,14 @@ def get_puzzle_near_rating(target_elo: int) -> Optional[Dict[str, Any]]:
     ).fetchone()
     if not row: return None
     return dict(zip(["puzzle_id", "fen", "moves", "rating"], row))
+
+def top3_puzzles() -> List[Dict[str, Any]]:
+    conn = get_db_conn()
+    if not conn: return []
+    rows = conn.execute(
+        "SELECT puzzle_id, fen, moves, rating FROM puzzles ORDER BY rating DESC LIMIT 3"
+    ).fetchall()
+    return [dict(zip(["puzzle_id", "fen", "moves", "rating"], r)) for r in rows]
 
 # ==================== HELPERS ====================
 def pretty_score(info: chess.engine.InfoDict, board: chess.Board) -> str:
@@ -95,12 +117,64 @@ def pv_to_san_line(board: chess.Board, pv: List[chess.Move], n: int = 6) -> str:
         except: break
     return " ".join(parts)
 
-# ==================== STREAMLIT CLOUD 호환 render_board ====================
-def render_board(board: chess.Board, size: int = 400):
+def hash_pw(pw: str) -> str: return sha256(pw.encode()).hexdigest()
+
+# ==================== BOARD RENDER ====================
+def render_board_clickable(board: chess.Board, size: int = 400):
     svg_data = chess.svg.board(board, size=size)
     b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
-    html = f'<img src="data:image/svg+xml;base64,{b64}" width="{size}" height="{size}">'
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(f'<img src="data:image/svg+xml;base64,{b64}" width="{size}" height="{size}">', unsafe_allow_html=True)
+    squares = [square for square in chess.SQUARE_NAMES]
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.selected_from = st.selectbox(
+            "From", squares, index=squares.index(st.session_state.selected_from) if st.session_state.selected_from else 0
+        )
+    with col2:
+        to_square = st.selectbox("To", squares)
+    if st.button("Make Move"):
+        move = chess.Move.from_uci(f"{st.session_state.selected_from}{to_square}")
+        if move in board.legal_moves:
+            st.session_state.selected_from = None
+            return move
+        else: st.warning("Illegal move")
+    return None
+
+# ==================== LOGIN / REGISTER ====================
+def login_page():
+    st.subheader("Login / Register")
+    conn = get_db_conn()
+    c = conn.cursor()
+    col1, col2 = st.columns(2)
+
+    # --- LOGIN ---
+    with col1:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            row = c.execute("SELECT password_hash, elo FROM users WHERE username=?", (username,)).fetchone()
+            if row and row[0] == hash_pw(password):
+                st.session_state.user_logged_in = True
+                st.session_state.username = username
+                st.session_state.user_elo = row[1]
+                st.success(f"Welcome back {username}!")
+            else: st.error("Invalid credentials")
+
+    # --- REGISTER ---
+    with col2:
+        reg_username = st.text_input("New Username")
+        reg_password = st.text_input("New Password", type="password", key="reg_pw")
+        if st.button("Register"):
+            if not reg_username or not reg_password:
+                st.warning("Fill username and password")
+                return
+            if c.execute("SELECT * FROM users WHERE username=?", (reg_username,)).fetchone():
+                st.warning("Username already exists")
+            else:
+                c.execute("INSERT INTO users (username, password_hash, elo) VALUES (?, ?, ?)",
+                          (reg_username, hash_pw(reg_password), 1200))
+                conn.commit()
+                st.success("Registered! Please login.")
 
 # ==================== APP UI ====================
 engine, engine_path, engine_logs = open_engine_with_diagnostics()
@@ -109,39 +183,35 @@ st.session_state.worker = EngineWorker(engine) if engine else None
 st.sidebar.title("CheckmateAI")
 board_size = st.sidebar.slider("Board Size (px)", 280, 600, 420, step=20)
 st.session_state.engine_ms = st.sidebar.slider("Engine Think Time (ms)", 100, 3000, 600)
-st.session_state.user_elo = st.sidebar.number_input("Your Training ELO", 400, 3000, st.session_state.user_elo)
+if st.session_state.user_logged_in:
+    st.sidebar.write(f"Logged in as: {st.session_state.username}")
+    st.sidebar.write(f"ELO: {st.session_state.user_elo}")
 
 with st.sidebar.expander("⚙️ Diagnostics", expanded=(engine is None)):
     st.write(f"Python: {sys.version.split()[0]}")
     st.write(f"Chosen engine: {engine_path or '(none)'}")
     for line in engine_logs: st.write(line)
 
+if not st.session_state.user_logged_in:
+    login_page()
+    st.stop()
+
 TAB_PLAY, TAB_PUZZLES, TAB_ANALYSIS = st.tabs(["♟️ Play vs AI", "🧩 Puzzles", "📊 Analysis"])
 
-# ==================== PLAY vs AI (Chat Input) ====================
+# ==================== PLAY ====================
 with TAB_PLAY:
-    st.subheader("Play vs AI (Chat Input)")
-    col1, col2 = st.columns([1.7, 1])
+    st.subheader("Play vs AI (Click-Select Input)")
+    col1, col2 = st.columns([1.7,1])
     with col1:
-        render_board(st.session_state.board, size=board_size)
-        move_input = st.text_input("Enter your move (e.g., e2e4, Nf3):")
-        if st.button("Submit Move") and move_input:
-            try:
-                user_move = chess.Move.from_uci(move_input) if len(move_input) == 4 else st.session_state.board.parse_san(move_input)
-                if user_move in st.session_state.board.legal_moves:
-                    st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(user_move)})
-                    st.session_state.board.push(user_move)
-                    # AI 수 두기
-                    if st.session_state.worker and not st.session_state.board.is_game_over():
-                        ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
-                        if ai_move:
-                            st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
-                            st.session_state.board.push(ai_move)
-                    st.rerun()
-                else:
-                    st.warning("Illegal move.")
-            except ValueError:
-                st.warning("Invalid move format.")
+        move = render_board_clickable(st.session_state.board, size=board_size)
+        if move:
+            st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(move)})
+            st.session_state.board.push(move)
+            if st.session_state.worker and not st.session_state.board.is_game_over():
+                ai_move = st.session_state.worker.play(st.session_state.board, st.session_state.engine_ms)
+                if ai_move:
+                    st.session_state.history.append({"ply": len(st.session_state.history)+1, "san": st.session_state.board.san(ai_move)})
+                    st.session_state.board.push(ai_move)
     with col2:
         st.write("Move History")
         st.dataframe(pd.DataFrame(st.session_state.history).tail(30), use_container_width=True, hide_index=True)
@@ -152,57 +222,48 @@ with TAB_PLAY:
             infos = st.session_state.worker.analyse(st.session_state.board, 3, st.session_state.engine_ms)
             for i, info in enumerate(infos, 1):
                 st.write(f"{i}. **{pv_to_san_line(st.session_state.board, info.get('pv',[]),6)}** `({pretty_score(info, st.session_state.board)})`")
-        else:
-            st.warning("Chess engine not available for analysis.")
 
-# ==================== PUZZLES (Chat Input) ====================
+# ==================== PUZZLES ====================
 with TAB_PUZZLES:
-    st.subheader("Rating-based Puzzle (Chat Input)")
-
+    st.subheader("Rating-based Puzzle")
     if st.session_state.puzzle_result:
-        if "Correct" in st.session_state.puzzle_result:
-            st.success(st.session_state.puzzle_result)
-        else:
-            st.error(st.session_state.puzzle_result)
-
+        st.success(st.session_state.puzzle_result) if "Correct" in st.session_state.puzzle_result else st.error(st.session_state.puzzle_result)
     if st.button("Load New Puzzle"):
         st.session_state.puzzle = get_puzzle_near_rating(st.session_state.user_elo)
         st.session_state.puzzle_result = ""
         if st.session_state.puzzle:
             st.session_state.puzzle_board.set_fen(st.session_state.puzzle["fen"])
-        else:
-            st.warning("No more puzzles found in this rating range.")
-        st.experimental_rerun()
-
     if st.session_state.puzzle:
         pz = st.session_state.puzzle
-        render_board(st.session_state.puzzle_board, size=board_size)
-
-        # 흑/백 표시
-        player_color = "White" if st.session_state.puzzle_board.turn else "Black"
-        st.info(f"Your color: {player_color}")
-
-        user_puzzle_move = st.text_input("Enter your move for the puzzle:", key="puzzle_input")
+        render_board_clickable(st.session_state.puzzle_board, size=board_size)
+        st.info(f"Your color: {'White' if st.session_state.puzzle_board.turn else 'Black'}")
+        col1, col2 = st.columns(2)
+        with col1: from_square = st.selectbox("From", chess.SQUARE_NAMES, key="puzzle_from")
+        with col2: to_square = st.selectbox("To", chess.SQUARE_NAMES, key="puzzle_to")
         if st.button("Submit Puzzle Move"):
             try:
-                move_obj = chess.Move.from_uci(user_puzzle_move) if len(user_puzzle_move) == 4 else st.session_state.puzzle_board.parse_san(user_puzzle_move)
+                move_obj = chess.Move.from_uci(f"{from_square}{to_square}")
                 solution_move_uci = pz['moves'].split()[0]
-
+                conn = get_db_conn()
                 if move_obj.uci() == solution_move_uci:
                     st.session_state.user_elo += 20
                     st.session_state.puzzle_result = f"✅ Correct! +20 ELO ({solution_move_uci})"
-                    conn = get_db_conn()
-                    if conn: 
+                    if conn:
                         conn.execute("INSERT OR IGNORE INTO solved_puzzles (puzzle_id) VALUES (?)", (pz['puzzle_id'],))
+                        conn.execute("UPDATE users SET elo=? WHERE username=?", (st.session_state.user_elo, st.session_state.username))
                         conn.commit()
                 else:
                     st.session_state.user_elo = max(400, st.session_state.user_elo - 15)
                     st.session_state.puzzle_result = f"❌ Not quite. The best move was {solution_move_uci}"
-
-                # 체스판은 유지, 퍼즐은 초기화 안 함
+                    if conn:
+                        conn.execute("UPDATE users SET elo=? WHERE username=?", (st.session_state.user_elo, st.session_state.username))
+                        conn.commit()
                 st.session_state.puzzle_board.set_fen(pz["fen"])
             except ValueError:
-                st.warning("Invalid move format.")
+                st.warning("Invalid move format")
+        st.subheader("Top 3 Puzzles")
+        for p in top3_puzzles():
+            st.markdown(f"{p['puzzle_id']} — Rating: {p['rating']} — Moves: {p['moves']}")
 
 # ==================== ANALYSIS ====================
 with TAB_ANALYSIS:
@@ -212,12 +273,11 @@ with TAB_ANALYSIS:
         try:
             board_to_analyze = chess.Board(fen_to_analyze)
             a1, a2 = st.columns([1.6,1])
-            with a1: render_board(board_to_analyze, size=board_size)
+            with a1: render_board_clickable(board_to_analyze, size=board_size)
             with a2:
                 if st.button("Analyse Position", key="analyse_btn"):
                     if st.session_state.worker:
                         st.session_state.last_analysis = st.session_state.worker.analyse(board_to_analyze, 5, st.session_state.engine_ms)
-                    else: st.warning("Chess engine not available for analysis.")
                 if st.session_state.last_analysis:
                     rows = [{"Rank": i+1, "Score": pretty_score(info, board_to_analyze), "Line": pv_to_san_line(board_to_analyze, info.get("pv", []), 10)} for i, info in enumerate(st.session_state.last_analysis)]
                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
