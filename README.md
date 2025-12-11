@@ -51,6 +51,33 @@
 
 ---
 
+## 📸 스크린샷
+
+<div align="center">
+
+### 🏠 메인 화면
+<img src="images/main.jpeg" alt="CheckmateAI 홈 인터페이스" width="800"/>
+
+*5가지 게임 모드를 선택할 수 있는 메인 화면*
+
+<br/>
+
+### 🤖 AI 대결 모드
+<img src="images/ai-battle.jpeg" alt="Stockfish 기반 AI 대국 화면" width="800"/>
+
+*Stockfish 엔진과 대결 - 20단계 난이도 조절 가능*
+
+<br/>
+
+### 🧩 퍼즐 모드
+<img src="images/puzzle.jpeg" alt="퍼즐 모드 UI" width="800"/>
+
+*516만 개 Lichess 퍼즐 - 턴 인디케이터, 힌트, 정답 보기 기능*
+
+</div>
+
+---
+
 ## 🚀 빠른 시작
 
 ### 필수 요구사항
