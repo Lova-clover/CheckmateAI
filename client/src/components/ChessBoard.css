@@ -1,0 +1,68 @@
+.chess-board-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.chess-board-container > div {
+  width: 100% !important;
+}
+
+/* Custom piece animations */
+@keyframes pieceMove {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Hover effects for pieces */
+.chess-board-container [data-piece]:hover {
+  cursor: grab;
+  filter: brightness(1.2);
+  transition: filter 0.2s ease;
+}
+
+.chess-board-container [data-piece]:active {
+  cursor: grabbing;
+}
+
+/* Square highlighting */
+.highlighted-square {
+  background-color: rgba(255, 255, 0, 0.4) !important;
+}
+
+.selected-square {
+  background-color: rgba(20, 85, 30, 0.5) !important;
+}
+
+.legal-move-square {
+  position: relative;
+}
+
+.legal-move-square::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20%;
+  height: 20%;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.2);
+  transform: translate(-50%, -50%);
+}
+
+/* Last move highlighting */
+.last-move-from,
+.last-move-to {
+  background-color: rgba(255, 255, 0, 0.3) !important;
+}

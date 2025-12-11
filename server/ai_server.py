@@ -1,168 +1,206 @@
 import os
-import sqlite3
+import sys
 import chess
 import chess.engine
-import firebase_admin
-from firebase_admin import credentials, firestore
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import random
-import requests
-import json
 
-# --- Firebase Admin SDK 초기화 ---
-# 환경 변수에서 Firebase 인증 정보 로드
-firebase_json_str = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
-if not firebase_json_str:
-    raise ValueError("FIREBASE_SERVICE_ACCOUNT 환경 변수가 설정되지 않았습니다.")
-
-firebase_credentials = json.loads(firebase_json_str)
-cred = credentials.Certificate(firebase_credentials)
-firebase_admin.initialize_app(cred)
-firestore_db = firestore.client()
+# ai_engine 모듈을 import할 수 있도록 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- FastAPI 앱 생성 및 CORS 설정 ---
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    # Vercel에 배포된 React 앱의 주소를 허용합니다.
-    allow_origins=["https://checkmateai-app.vercel.app", "http://localhost:3000"],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Stockfish 엔진 및 DB 설정 ---
-DB_PATH = os.path.join(os.path.dirname(__file__), "puzzles.db")
+# --- Stockfish 엔진 설정 ---
+STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-windows-x86-64-avx2.exe")
 
-# DB 파일이 없으면 다운로드
-if not os.path.exists(DB_PATH):
-    print("puzzles.db를 찾을 수 없어 다운로드합니다...")
-    db_url = "https://www.dropbox.com/scl/fi/qu3izfif8iltdqvotqdpr/puzzles.db?rlkey=hkbt8zu0l28qj22o9rcitqidj&st=vo5edowl&dl=1"
-    r = requests.get(db_url, stream=True)
-    r.raise_for_status()
-    with open(DB_PATH, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
+if not os.path.exists(STOCKFISH_PATH):
+    print(f"⚠️  Stockfish 엔진을 찾을 수 없습니다: {STOCKFISH_PATH}")
+    print("   Stockfish를 다운로드하여 server/stockfish/ 폴더에 추가해주세요.")
+    STOCKFISH_PATH = None
 
-STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "stockfish", "stockfish-linux-x86-64-avx2")
-# 앱 시작 시 엔진을 한 번만 로드합니다.
-engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+# Stockfish 엔진 초기화
+engine = None
+if STOCKFISH_PATH:
+    try:
+        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        print(f"✅ Stockfish 엔진 초기화 완료: {STOCKFISH_PATH}")
+    except Exception as e:
+        print(f"❌ Stockfish 초기화 실패: {e}")
 
-def get_db_conn():
-    return sqlite3.connect(DB_PATH)
-
-# --- API 요청/응답 모델 정의 ---
+# --- Pydantic 모델 ---
 class MoveRequest(BaseModel):
     fen: str
-    level: str = 'medium'
+    difficulty: int = 5
 
-class PuzzleSubmitRequest(BaseModel):
-    user_id: str
-    puzzle_id: str
-    solved: bool
-    time: int
+# --- 엔드포인트 ---
+@app.get("/")
+def root():
+    return {"message": "CheckmateAI 서버가 실행 중입니다 ♟️"}
 
-# --- API 엔드포인트 ---
 @app.post("/ai/move")
 async def ai_move(request: MoveRequest):
-    board = chess.Board(request.fen)
+    """
+    주어진 FEN 포지션에서 AI의 최선의 수를 계산
+    """
     try:
-        # 비동기로 엔진을 실행하여 응답 지연을 최소화합니다.
-        result = await engine.play(board, chess.engine.Limit(time=0.5))
-        return {"move": result.move.uci()}
+        fen = request.fen
+        difficulty = request.difficulty
+        
+        board = chess.Board(fen)
+        
+        # Stockfish 엔진이 있으면 사용
+        if engine:
+            # 난이도에 따라 엔진 설정 조정
+            depth = min(difficulty * 2, 20)
+            time_limit = min(difficulty * 0.2, 2.0)
+            
+            # Stockfish 엔진으로 최선의 수 계산
+            result = engine.play(
+                board,
+                chess.engine.Limit(depth=depth, time=time_limit)
+            )
+            
+            if result.move:
+                return {"move": result.move.uci(), "success": True}
+        
+        # Fallback: 랜덤 합법수 (Stockfish 없을 때)
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            random_move = random.choice(legal_moves)
+            return {"move": random_move.uci(), "success": True, "fallback": True}
+        else:
+            raise HTTPException(status_code=400, detail="유효한 수를 찾을 수 없습니다")
+            
     except Exception as e:
+        print(f"❌ AI move 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/ai/puzzle")
-def get_puzzle(user_id: str):
-    user_ref = firestore_db.collection("users").document(user_id)
-    user_doc = user_ref.get()
-    score = user_doc.to_dict().get("score", 1200) if user_doc.exists else 1200
+async def get_puzzle(difficulty: str = "medium", user_rating: int = None):
+    """
+    랜덤 퍼즐 가져오기
+    """
+    try:
+        from ai_engine.puzzle_generator import PuzzleGenerator
+        
+        puzzle_gen = PuzzleGenerator()
+        puzzle = puzzle_gen.get_random_puzzle(difficulty=difficulty, user_rating=user_rating)
+        
+        return {
+            "puzzle_id": puzzle['puzzle_id'],
+            "fen": puzzle['fen'],
+            "solution": puzzle['solution'],
+            "difficulty": puzzle['difficulty'],
+            "theme": puzzle['theme'],
+            "rating": puzzle['rating'],
+            "success": True
+        }
+    except Exception as e:
+        print(f"❌ 퍼즐 로드 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    conn = get_db_conn()
-    cursor = conn.cursor()
-    # 로직은 기존과 동일하게 유지
-    cursor.execute("SELECT puzzle_id, fen, moves, rating FROM puzzles WHERE rating BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 1", (score - 100, score + 100))
-    puzzle = cursor.fetchone()
-    conn.close()
+@app.get("/ai/puzzle/hint")
+async def get_puzzle_hint(puzzle_id: str, move_index: int = 0):
+    """
+    퍼즐 힌트 가져오기
+    """
+    try:
+        from ai_engine.puzzle_generator import PuzzleGenerator
+        
+        puzzle_gen = PuzzleGenerator()
+        hint_data = puzzle_gen.get_hint(puzzle_id, move_index)
+        
+        if hint_data:
+            # hint_data가 딕셔너리면 'hint' 키로 접근, 문자열이면 그대로 반환
+            hint_text = hint_data.get('hint') if isinstance(hint_data, dict) else hint_data
+            return {"hint": hint_text, "success": True}
+        else:
+            raise HTTPException(status_code=404, detail="힌트를 찾을 수 없습니다")
+    except Exception as e:
+        import traceback
+        print(f"❌ 힌트 로드 오류: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if not puzzle:
-        raise HTTPException(status_code=404, detail="No puzzles found in the rating range.")
+@app.post("/ai/top-player/move")
+async def get_top_player_move(request: dict):
+    """
+    TOP Player 스타일로 수 계산
+    """
+    try:
+        fen = request.get("fen")
+        player_name = request.get("player_name", "마그누스 칼슨")
+        time_limit = request.get("time_limit", 1.0)
+        
+        if not fen:
+            raise HTTPException(status_code=400, detail="FEN이 제공되지 않았습니다")
+        
+        board = chess.Board(fen)
+        
+        # Stockfish 엔진이 있으면 TOP Player AI 사용
+        if engine:
+            from ai_engine.top_player_ai import TopPlayerAI
+            top_player_ai = TopPlayerAI(engine)
+            move = top_player_ai.get_move(fen, player_name, time_limit)
+            
+            if move:
+                return {"move": move, "player": player_name, "success": True}
+        
+        # Fallback: 랜덤 합법수 (Stockfish 없을 때)
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            random_move = random.choice(legal_moves)
+            return {"move": random_move.uci(), "player": player_name, "success": True, "fallback": True}
+        else:
+            raise HTTPException(status_code=400, detail="유효한 수를 찾을 수 없습니다")
+    except Exception as e:
+        print(f"❌ TOP Player move 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {
-        "puzzle_id": puzzle[0],
-        "fen": puzzle[1],
-        "solution": puzzle[2].split(),
-        "description": f"난이도 {puzzle[3]}",
-        "hint": puzzle[2].split()[0],
-        "score": score
-    }
-
-@app.post("/ai/puzzle/submit")
-def submit_puzzle(request: PuzzleSubmitRequest):
-    # 기존 점수 계산 및 Firestore 저장 로직을 그대로 사용합니다.
-    # (이 부분은 ai_server.py의 submit_result 함수와 거의 동일합니다)
-    conn = get_db_conn()
-    cursor = conn.cursor()
-    cursor.execute("SELECT rating FROM puzzles WHERE puzzle_id = ?", (request.puzzle_id,))
-    puzzle_rating_row = cursor.fetchone()
-    conn.close()
-    if not puzzle_rating_row:
-        raise HTTPException(status_code=404, detail="Puzzle not found.")
-    puzzle_rating = puzzle_rating_row[0]
-
-    user_ref = firestore_db.collection("users").document(request.user_id)
-    user_doc = user_ref.get()
-    score = user_doc.to_dict().get("score", 1200) if user_doc.exists else 1200
-
-    diff = puzzle_rating - score
-    delta = 20 + diff // 40 if request.solved else -15 + diff // 80
-    new_score = max(600, score + delta)
-
-    user_ref.set({"score": new_score}, merge=True)
-    user_ref.collection("records").add({
-        "puzzle_id": request.puzzle_id,
-        "solved": request.solved,
-        "time": request.time,
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
-
-    return {"new_score": new_score, "delta": delta}
-
-
-@app.get("/ai/user/stats")
-def get_user_stats(user_id: str):
-    user_ref = firestore_db.collection("users").document(user_id)
-    user_doc = user_ref.get()
-    score = user_doc.to_dict()["score"] if user_doc.exists else 1200
-
-    all_records = list(user_ref.collection("records").stream())
-    total = len(all_records)
-    success = sum(1 for r in all_records if r.to_dict().get("solved"))
-    rate = round(success / total * 100, 1) if total > 0 else 0.0
-
-    records_ref = user_ref.collection("records").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(5)
-    recent_records = records_ref.stream()
-    recent = []
-    for r in recent_records:
-        data = r.to_dict()
-        recent.append({
-            "puzzle_id": data.get("puzzle_id"),
-            "solved": data.get("solved"),
-            "time": data.get("time"),
-            "date": data.get("timestamp").isoformat() if data.get("timestamp") else None
-        })
-    return {
-        "score": score,
-        "total": total,
-        "success": success,
-        "success_rate": rate,
-        "recent": recent
-    }
+@app.get("/ai/top-players")
+async def list_top_players():
+    """
+    사용 가능한 TOP Player 목록
+    """
+    try:
+        from ai_engine.top_player_ai import TopPlayerAI
+        
+        if not engine:
+            raise HTTPException(status_code=500, detail="Stockfish 엔진이 초기화되지 않았습니다")
+        
+        top_player_ai = TopPlayerAI(engine)
+        players = top_player_ai.list_players()
+        
+        player_info = []
+        for player_name in players:
+            info = top_player_ai.get_player_info(player_name)
+            player_info.append({
+                "name": player_name,
+                "rating": info['rating'],
+                "style": info['style']
+            })
+        
+        return {"players": player_info, "success": True}
+    except Exception as e:
+        print(f"❌ TOP Players 목록 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("shutdown")
 def shutdown_event():
-    engine.quit()
+    if engine:
+        engine.quit()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
