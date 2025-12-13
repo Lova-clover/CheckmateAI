@@ -280,6 +280,14 @@ npm error ERESOLVE unable to resolve dependency tree
 
 <div align="center">
 
+## 📘 More Details
+CheckmateAI를 어떻게 설계 및 개발했는지, 구현 과정과 회고는 아래 블로그에서 자세히 정리했습니다.
+
+- [CheckmateAI – Stockfish 엔진과 퍼즐로 만든 로컬 체스 플랫폼 (Velog)](https://velog.io/@lova-clover/CheckmateAI-Stockfish-%EC%97%94%EC%A7%84%EA%B3%BC-%ED%8D%BC%EC%A6%90%EB%A1%9C-%EB%A7%8C%EB%93%A0-%EB%A1%9C%EC%BB%AC-%EC%B2%B4%EC%8A%A4-%ED%94%8C%EB%9E%AB%ED%8F%BC)
+
+---
+
+
 **즐거운 체스 게임 되세요! ♟️**
 
 Made with ❤️ by CheckmateAI Team
