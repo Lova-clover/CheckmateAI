@@ -420,10 +420,12 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
               lastOpponentMove
                 ? {
                     [lastOpponentMove.from]: {
-                      backgroundColor: 'rgba(255, 255, 0, 0.4)',
+                      backgroundColor: 'rgba(248, 113, 113, 0.4)',
+                      boxShadow: 'inset 0 0 0 3px rgba(239, 68, 68, 0.75)',
                     },
                     [lastOpponentMove.to]: {
-                      backgroundColor: 'rgba(255, 255, 0, 0.4)',
+                      backgroundColor: 'rgba(250, 204, 21, 0.45)',
+                      boxShadow: 'inset 0 0 0 3px rgba(234, 179, 8, 0.8)',
                     },
                   }
                 : {}
@@ -440,18 +442,18 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               style={{
-                padding: '12px',
-                background: 'rgba(255, 255, 0, 0.2)',
-                borderRadius: '8px',
+                padding: '10px 14px',
+                background: 'rgba(255, 255, 0, 0.25)',
+                borderRadius: '10px',
                 marginBottom: '15px',
-                border: '2px solid rgba(255, 255, 0, 0.5)',
+                border: '2px solid rgba(255, 200, 0, 0.6)',
                 textAlign: 'center'
               }}
             >
-              <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>
+              <div style={{ fontSize: '12px', color: '#1e293b', marginBottom: '3px', fontWeight: '600' }}>
                 상대의 마지막 수
               </div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
+              <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', textShadow: '0 1px 2px rgba(255,255,255,0.5)' }}>
                 {lastOpponentMove.from} → {lastOpponentMove.to}
               </div>
             </motion.div>

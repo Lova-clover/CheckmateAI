@@ -40,7 +40,7 @@
 | 🤖 **AI 대결** | 20단계 난이도 조절 | 초보자부터 마스터급까지 |
 | 🏆 **TOP Player** | 세계 챔피언 스타일 | 5명의 실제 선수 플레이 스타일 |
 | 🧩 **퍼즐** | 실전 전술 훈련 | 516만개 퍼즐, 힌트/정답 시스템 |
-| 📊 **분석** | 게임 분석 | Stockfish 엔진 평가 |
+| 📊 **게임 분석** | PGN 게임 분석 | Stockfish 평가, 실수 감지 |
 
 ### 🎨 프리미엄 UI/UX
 
@@ -73,6 +73,13 @@
 <img src="images/puzzle.jpeg" alt="퍼즐 모드 UI" width="800"/>
 
 *516만 개 Lichess 퍼즐 - 턴 인디케이터, 힌트, 정답 보기 기능*
+
+<br/>
+
+### 📊 게임 분석 모드
+<img src="images/live_analytics.jpeg" alt="실시간 게임 분석" width="800"/>
+
+*Stockfish 엔진 기반 실시간 분석 - 최선수 추천, 실수/블런더 자동 감지*
 
 </div>
 
@@ -257,6 +264,7 @@ npm error ERESOLVE unable to resolve dependency tree
 - [x] 20단계 난이도
 - [x] 체스 타이머
 - [x] 드래그 앤 드롭
+- [x] 게임 분석 모드
 
 ### 🚧 진행 중
 - [x] 퍼즐 DB 확장 (Lichess 516만개 퍼즐 데이터베이스)

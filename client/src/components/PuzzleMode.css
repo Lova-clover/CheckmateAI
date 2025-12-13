@@ -186,6 +186,10 @@
 /* 보드 섹션 */
 .puzzle-board-section {
   position: relative;
+  background: rgba(30, 60, 114, 0.3);
+  padding: 20px;
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
 }
 
 /* 턴 표시 */
@@ -262,35 +266,35 @@
   margin-bottom: 12px;
 }
 
-.hint-btn {
-  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-  color: #333;
+.control-btn.hint-btn {
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%) !important;
+  color: #333 !important;
 }
 
-.hint-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #FFC700 0%, #FF9500 100%);
+.control-btn.hint-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #FFC700 0%, #FF9500 100%) !important;
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(255, 165, 0, 0.4);
 }
 
-.solution-btn {
-  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
-  color: white;
+.control-btn.solution-btn {
+  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%) !important;
+  color: white !important;
 }
 
-.solution-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+.control-btn.solution-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%) !important;
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
 }
 
-.next-btn {
-  background: linear-gradient(135deg, #4CAF50 0%, #45A049 100%);
-  color: white;
+.control-btn.next-btn {
+  background: linear-gradient(135deg, #4CAF50 0%, #45A049 100%) !important;
+  color: white !important;
 }
 
-.next-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #43A047 0%, #388E3C 100%);
+.control-btn.next-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #43A047 0%, #388E3C 100%) !important;
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
 }

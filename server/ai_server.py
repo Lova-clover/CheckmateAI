@@ -2,6 +2,8 @@ import os
 import sys
 import chess
 import chess.engine
+import chess.pgn
+import io
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -140,7 +142,7 @@ async def get_top_player_move(request: dict):
     """
     try:
         fen = request.get("fen")
-        player_name = request.get("player_name", "마그누스 칼슨")
+        player_name = request.get("player_name", "매그너스 칼슨")
         time_limit = request.get("time_limit", 1.0)
         
         if not fen:
@@ -194,6 +196,92 @@ async def list_top_players():
         return {"players": player_info, "success": True}
     except Exception as e:
         print(f"❌ TOP Players 목록 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AnalyzeRequest(BaseModel):
+    pgn: str
+
+@app.post("/ai/analyze")
+def analyze_game(request: AnalyzeRequest):
+    """게임 PGN을 분석하여 각 수의 평가와 실수를 반환"""
+    if not engine:
+        raise HTTPException(status_code=503, detail="Stockfish 엔진이 초기화되지 않았습니다")
+    
+    try:
+        board = chess.Board()
+        pgn_io = io.StringIO(request.pgn)
+        game = chess.pgn.read_game(pgn_io)
+        
+        if not game:
+            raise HTTPException(status_code=400, detail="유효하지 않은 PGN입니다")
+        
+        analysis_results = []
+        move_number = 1
+        previous_eval = 0
+        
+        for node in game.mainline():
+            move = node.move
+            board.push(move)
+            
+            # Stockfish로 현재 포지션 평가
+            info = engine.analyse(board, chess.engine.Limit(depth=15))
+            score = info.get("score")
+            
+            if score:
+                # 점수를 백의 관점으로 변환 (폰 단위)
+                if score.is_mate():
+                    # 메이트까지 수
+                    mate_in = score.relative.mate()
+                    evaluation = 100 if mate_in > 0 else -100
+                else:
+                    # 센티폰을 폰으로 변환
+                    evaluation = score.relative.score() / 100.0
+            else:
+                evaluation = 0
+            
+            # 최선의 수 찾기
+            board.pop()
+            best_move_info = engine.analyse(board, chess.engine.Limit(depth=15))
+            best_move = best_move_info.get("pv", [None])[0]
+            best_move_san = board.san(best_move) if best_move else ""
+            board.push(move)
+            
+            # 수의 분류 (eval 차이로 판단)
+            eval_diff = abs(evaluation - previous_eval)
+            played_move = node.san()
+            
+            if played_move == best_move_san:
+                classification = "best"
+            elif eval_diff < 0.3:
+                classification = "good"
+            elif eval_diff < 1.0:
+                classification = "inaccuracy"
+            elif eval_diff < 3.0:
+                classification = "mistake"
+            else:
+                classification = "blunder"
+            
+            analysis_results.append({
+                "move": played_move,
+                "moveNumber": move_number,
+                "evaluation": round(evaluation, 2),
+                "bestMove": best_move_san,
+                "classification": classification,
+                "evalDiff": round(eval_diff, 2)
+            })
+            
+            previous_eval = evaluation
+            
+            # 백/흑 번갈아가며 수 번호 증가
+            if board.turn == chess.WHITE:
+                move_number += 1
+        
+        return {"analysis": analysis_results, "success": True}
+        
+    except Exception as e:
+        print(f"❌ 게임 분석 오류: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("shutdown")

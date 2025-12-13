@@ -241,7 +241,7 @@ async def get_top_player_move(request: dict):
         from ai_engine.top_player_ai import TopPlayerAI
         
         fen = request.get("fen")
-        player_name = request.get("player_name", "마그누스 칼슨")
+        player_name = request.get("player_name", "매그너스 칼슨")
         time_limit = request.get("time_limit", 1.0)
         
         if not fen:

@@ -57,7 +57,7 @@ export const GameModeSelector: React.FC<GameModeSelectorProps> = ({
   ];
 
   const topPlayers = [
-    { name: '마그누스 칼슨', rating: 2830, style: 'aggressive' },
+    { name: '매그너스 칼슨', rating: 2830, style: 'aggressive' },
     { name: '이안 네포므냐치', rating: 2750, style: 'positional' },
     { name: '딩 리렌', rating: 2780, style: 'tactical' },
     { name: '파비아노 카루아나', rating: 2800, style: 'solid' },
@@ -91,11 +91,8 @@ export const GameModeSelector: React.FC<GameModeSelectorProps> = ({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.8, opacity: 0 }}
       >
-        <button className="close-btn" onClick={onClose}>
-          <FaTimes />
-        </button>
-
-        <h2 className="modal-title">게임 모드 선택</h2>
+        <h2 className="modal-title">♟️ CheckmateAI</h2>
+        <p className="modal-subtitle">당신의 체스 여정을 시작하세요</p>
 
         <div className="game-modes-grid">
           {gameModes.map((mode) => (

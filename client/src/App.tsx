@@ -6,6 +6,7 @@ import { Timer } from './components/Timer';
 import { PlayerCard } from './components/PlayerCard';
 import { GameModeSelector } from './components/GameModeSelector';
 import { PuzzleMode } from './components/PuzzleMode';
+import { GameAnalysis } from './components/GameAnalysis';
 import { useChessGame } from './hooks/useChessGame';
 import { useChessTimer } from './hooks/useChessTimer';
 import './App.css';
@@ -213,13 +214,19 @@ function App() {
         )}
       </AnimatePresence>
 
+      {!showModeSelector && gameMode === 'analysis' && (
+        <GameAnalysis
+          onBackToMenu={() => setShowModeSelector(true)}
+        />
+      )}
+
       {!showModeSelector && gameMode === 'puzzle' && (
         <PuzzleMode
           onBackToMenu={() => setShowModeSelector(true)}
         />
       )}
 
-      {!showModeSelector && gameMode !== 'puzzle' && (
+      {!showModeSelector && gameMode !== 'puzzle' && gameMode !== 'analysis' && (
         <motion.div
           className="game-container"
           initial={{ opacity: 0 }}
