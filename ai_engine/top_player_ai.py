@@ -9,7 +9,7 @@ class TopPlayerAI:
     def __init__(self, engine):
         self.engine = engine
         self.player_styles = {
-            "마그누스 칼슨": {
+            "매그너스 칼슨": {
                 "rating": 2830,
                 "style": "aggressive",
                 "opening_preference": "dynamic",
