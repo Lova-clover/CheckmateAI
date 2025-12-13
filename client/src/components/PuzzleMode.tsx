@@ -19,6 +19,11 @@ interface Puzzle {
   rating: number;
 }
 
+interface HighlightSquares {
+  from: string;
+  to: string;
+}
+
 export const PuzzleMode: React.FC<PuzzleModeProps> = ({
   difficulty = 'medium',
   onBackToMenu
@@ -34,11 +39,47 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
   const [puzzlesSolved, setPuzzlesSolved] = useState(0);
   const [totalAttempts, setTotalAttempts] = useState(0);
   const [isShowingSolution, setIsShowingSolution] = useState(false);
+  const [lastOpponentMove, setLastOpponentMove] = useState<HighlightSquares | null>(null);
+  const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>('white');
 
   // 퍼즐 불러오기
   useEffect(() => {
     loadNewPuzzle();
   }, []);
+
+  // 퍼즐이 로드되면 상대의 첫 수를 자동으로 둠
+  useEffect(() => {
+    if (!currentPuzzle || currentSolutionIndex !== 1) return;
+    
+    console.log('=== useEffect: 상대의 수 실행 ===');
+    const opponentMove = currentPuzzle.solution[0];
+    const from = opponentMove.substring(0, 2);
+    const to = opponentMove.substring(2, 4);
+    const promotion = opponentMove.length > 4 ? opponentMove[4] : undefined;
+    
+    console.log('상대의 수:', opponentMove);
+    console.log('실행 전 game.turn():', game.turn());
+    console.log('실행 전 game.fen():', game.fen());
+    
+    // 1.5초 후 실행
+    const timer = setTimeout(() => {
+      try {
+        console.log('>>> makeMove 호출');
+        const result = makeMove({ from, to, promotion: promotion as any });
+        console.log('>>> makeMove 결과:', result);
+        console.log('>>> 실행 후 game.turn():', game.turn());
+        console.log('>>> 실행 후 game.fen():', game.fen());
+        
+        if (!result) {
+          console.error('>>> makeMove 실패!');
+        }
+      } catch (error) {
+        console.error('>>> makeMove 에러:', error);
+      }
+    }, 1500);
+    
+    return () => clearTimeout(timer);
+  }, [currentPuzzle, currentSolutionIndex]);
 
   const loadNewPuzzle = async () => {
     setLoading(true);
@@ -50,22 +91,50 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
       if (response.ok) {
         const data = await response.json();
         console.log('퍼즐 데이터:', data);
-        setCurrentPuzzle(data);
+        
+        // 먼저 상태 초기화 (currentPuzzle 설정 전)
+        setUserMoves([]);
+        setCurrentSolutionIndex(1);
+        setPuzzleStatus('solving');
+        setHint('');
+        setShowSolution(false);
+        setIsShowingSolution(false);
         
         // FEN 로드 (loadFen 함수 사용하여 gameState도 함께 업데이트)
         const loaded = loadFen(data.fen);
         if (loaded) {
-          console.log('퍼즐 FEN 로드 성공:', data.fen);
+          console.log('=== 퍼즐 로딩 시작 ===');
+          console.log('FEN:', data.fen);
+          console.log('Solution:', data.solution);
+          console.log('FEN 로드 후 현재 turn:', game.turn(), '(w=백, b=흑)');
+          
+          // solution[0]은 상대가 둬야 할 수
+          const opponentMove = data.solution[0];
+          const from = opponentMove.substring(0, 2);
+          const to = opponentMove.substring(2, 4);
+          
+          // 상대가 수를 두고 나면 플레이어 차례
+          // 플레이어가 흑이면 보드를 뒤집어야 함
+          const opponentColor = game.turn(); // 현재 턴 = 상대 색깔
+          const playerColor = opponentColor === 'w' ? 'b' : 'w'; // 플레이어 색깔
+          console.log('상대 색깔:', opponentColor === 'w' ? '백' : '흑');
+          console.log('플레이어 색깔:', playerColor === 'w' ? '백' : '흑');
+          
+          setBoardOrientation(playerColor === 'w' ? 'white' : 'black');
+          
+          // 하이라이트 표시
+          setLastOpponentMove({ from, to });
+          
+          // 3초 후 하이라이트 제거
+          setTimeout(() => {
+            setLastOpponentMove(null);
+          }, 3000);
+          
+          // 퍼즐 설정 (useEffect가 상대의 수를 둘 것임)
+          setCurrentPuzzle(data);
         } else {
           console.error('FEN 로드 실패');
         }
-        
-        // 상태 초기화
-        setUserMoves([]);
-        setCurrentSolutionIndex(0);
-        setPuzzleStatus('solving');
-        setHint('');
-        setShowSolution(false);
         setIsShowingSolution(false);
       } else {
         console.error('퍼즐 로드 실패:', response.status, response.statusText);
@@ -110,25 +179,21 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
     
     if (move === expectedMove || move.substring(0, 4) === expectedMove.substring(0, 4)) {
       setUserMoves([...userMoves, move]);
+      const nextIndex = currentSolutionIndex + 1;
+      setCurrentSolutionIndex(nextIndex);
+      console.log(`정답! 인덱스: ${currentSolutionIndex} -> ${nextIndex}`);
       
-      if (currentSolutionIndex + 1 >= currentPuzzle.solution.length) {
+      if (nextIndex >= currentPuzzle.solution.length) {
         // 퍼즐 완료!
         console.log('퍼즐 완료!');
         setPuzzleStatus('correct');
         setPuzzlesSolved(puzzlesSolved + 1);
         setTotalAttempts(totalAttempts + 1);
       } else {
-        // 다음 수로 이동
-        const nextIndex = currentSolutionIndex + 1;
-        setCurrentSolutionIndex(nextIndex);
-        console.log('정답! 다음 수로 이동');
-        
-        // AI(퍼즐)의 응수를 자동으로 두기
-        if (nextIndex < currentPuzzle.solution.length) {
-          setTimeout(() => {
-            makePuzzleMove(nextIndex);
-          }, 500);
-        }
+        // 상대(AI)의 응수를 자동으로 두기 (짝수 인덱스 = 상대 수)
+        setTimeout(() => {
+          makePuzzleMove(nextIndex);
+        }, 500);
       }
     } else {
       // 오답 - undo하고 다시 시도 가능
@@ -145,24 +210,29 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
     return true;
   };
   
-  // 퍼즐의 수를 두는 함수
+  // 퍼즐의 수를 두는 함수 (상대 AI의 응답)
   const makePuzzleMove = (index: number) => {
-    if (!currentPuzzle || index >= currentPuzzle.solution.length) return;
+    if (!currentPuzzle || index >= currentPuzzle.solution.length) {
+      console.log('makePuzzleMove: 인덱스 범위 초과', index, currentPuzzle?.solution.length);
+      return;
+    }
     
     const puzzleMove = currentPuzzle.solution[index];
     const from = puzzleMove.substring(0, 2);
     const to = puzzleMove.substring(2, 4);
     const promotion = puzzleMove.length > 4 ? puzzleMove[4] : undefined;
     
-    console.log('퍼즐 AI 수:', puzzleMove);
+    console.log(`상대 AI 수 [${index}/${currentPuzzle.solution.length - 1}]:`, puzzleMove);
     
     const result = makeMove({ from, to, promotion: promotion as any });
     
     if (result) {
-      setCurrentSolutionIndex(index + 1);
+      const nextIndex = index + 1;
+      setCurrentSolutionIndex(nextIndex);
+      console.log(`상대 수 완료. 인덱스: ${index} -> ${nextIndex}`);
       
       // 마지막 수인지 확인
-      if (index + 1 >= currentPuzzle.solution.length) {
+      if (nextIndex >= currentPuzzle.solution.length) {
         console.log('퍼즐 완료!');
         setPuzzleStatus('correct');
         setPuzzlesSolved(puzzlesSolved + 1);
@@ -176,8 +246,9 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
 
     try {
       // 현재 퍼즐의 다음 수를 힌트로 표시
+      // solution[0]은 이미 둔 상대 수이므로, currentSolutionIndex는 1부터 시작
       const nextMove = currentPuzzle.solution[currentSolutionIndex];
-      if (nextMove) {
+      if (nextMove && currentSolutionIndex < currentPuzzle.solution.length) {
         const from = nextMove.substring(0, 2);
         const to = nextMove.substring(2, 4);
         const hintText = `${from} → ${to}`;
@@ -195,29 +266,67 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
   const handleShowSolution = () => {
     if (!currentPuzzle) return;
     
-    // 현재 위치에서 다음 한 수만 보여주기
-    if (currentSolutionIndex < currentPuzzle.solution.length) {
-      const move = currentPuzzle.solution[currentSolutionIndex];
-      const from = move.substring(0, 2);
-      const to = move.substring(2, 4);
-      const promotion = move.length > 4 ? move[4] : undefined;
+    console.log(`handleShowSolution 호출: currentIndex=${currentSolutionIndex}, total=${currentPuzzle.solution.length}`);
+    
+    // 현재 위치에서 다음 수 2개를 보여주기 (플레이어 수 + 상대 응답)
+    if (currentSolutionIndex >= currentPuzzle.solution.length) {
+      console.log('더 이상 수가 없습니다');
+      return;
+    }
+    
+    // 1. 플레이어의 수 (홀수 인덱스)
+    const playerMove = currentPuzzle.solution[currentSolutionIndex];
+    const from1 = playerMove.substring(0, 2);
+    const to1 = playerMove.substring(2, 4);
+    const promotion1 = playerMove.length > 4 ? playerMove[4] : undefined;
+    
+    console.log(`정답 보기: 플레이어 수 [${currentSolutionIndex}/${currentPuzzle.solution.length - 1}]: ${playerMove}`);
+    
+    const result1 = makeMove({ from: from1, to: to1, promotion: promotion1 as any });
+    
+    if (result1) {
+      const newIndex = currentSolutionIndex + 1;
+      setCurrentSolutionIndex(newIndex);
+      setHint(`수: ${from1}→${to1}`);
       
-      console.log(`정답 한 수 보여주기 ${currentSolutionIndex + 1}/${currentPuzzle.solution.length}: ${move}`);
-      const result = makeMove({ from, to, promotion: promotion as any });
+      console.log(`플레이어 수 완료. 인덱스: ${currentSolutionIndex} -> ${newIndex}`);
       
-      if (result) {
-        const newIndex = currentSolutionIndex + 1;
-        setCurrentSolutionIndex(newIndex);
-        setHint(`수 ${newIndex}/${currentPuzzle.solution.length}: ${from}→${to}`);
-        
-        // 마지막 수였다면 완료 처리
-        if (newIndex >= currentPuzzle.solution.length) {
-          setPuzzleStatus('correct');
-          setPuzzlesSolved(puzzlesSolved + 1);
-          setTotalAttempts(totalAttempts + 1);
-          setIsShowingSolution(false);
-        }
+      // 마지막 수였다면 완료 처리
+      if (newIndex >= currentPuzzle.solution.length) {
+        console.log('퍼즐 완료!');
+        setPuzzleStatus('correct');
+        setPuzzlesSolved(puzzlesSolved + 1);
+        setTotalAttempts(totalAttempts + 1);
+        setIsShowingSolution(false);
+        return;
       }
+      
+      // 2. 상대의 응답 (짝수 인덱스) - 0.8초 후에 자동으로
+      setTimeout(() => {
+        const opponentMove = currentPuzzle.solution[newIndex];
+        const from2 = opponentMove.substring(0, 2);
+        const to2 = opponentMove.substring(2, 4);
+        const promotion2 = opponentMove.length > 4 ? opponentMove[4] : undefined;
+        
+        console.log(`정답 보기: 상대 응답 [${newIndex}/${currentPuzzle.solution.length - 1}]: ${opponentMove}`);
+        
+        const result2 = makeMove({ from: from2, to: to2, promotion: promotion2 as any });
+        
+        if (result2) {
+          const finalIndex = newIndex + 1;
+          setCurrentSolutionIndex(finalIndex);
+          console.log(`상대 응답 완료. 인덱스: ${newIndex} -> ${finalIndex}`);
+          
+          // 마지막 수였다면 완료 처리
+          if (finalIndex >= currentPuzzle.solution.length) {
+            console.log('퍼즐 완료!');
+            setPuzzleStatus('correct');
+            setPuzzlesSolved(puzzlesSolved + 1);
+            setTotalAttempts(totalAttempts + 1);
+            setIsShowingSolution(false);
+          }
+        }
+      }, 800);
     }
   };
 
@@ -304,13 +413,50 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
           <ChessBoard
             position={gameState.fen}
             onPieceDrop={handlePieceDrop}
-            boardOrientation="white"
+            boardOrientation={boardOrientation}
             animationDuration={300}
             arePiecesDraggable={puzzleStatus === 'solving' && !isShowingSolution}
+            customSquareStyles={
+              lastOpponentMove
+                ? {
+                    [lastOpponentMove.from]: {
+                      backgroundColor: 'rgba(255, 255, 0, 0.4)',
+                    },
+                    [lastOpponentMove.to]: {
+                      backgroundColor: 'rgba(255, 255, 0, 0.4)',
+                    },
+                  }
+                : {}
+            }
           />
         </div>
 
         <div className="puzzle-right">
+          {/* 상대의 마지막 수 표시 */}
+          {lastOpponentMove && currentPuzzle && (
+            <motion.div
+              className="opponent-move-panel"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              style={{
+                padding: '12px',
+                background: 'rgba(255, 255, 0, 0.2)',
+                borderRadius: '8px',
+                marginBottom: '15px',
+                border: '2px solid rgba(255, 255, 0, 0.5)',
+                textAlign: 'center'
+              }}
+            >
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>
+                상대의 마지막 수
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
+                {lastOpponentMove.from} → {lastOpponentMove.to}
+              </div>
+            </motion.div>
+          )}
+          
           {/* 컨트롤 버튼들 */}
           <div className="puzzle-controls-panel">
             <h3>🎮 컨트롤</h3>
@@ -389,10 +535,10 @@ export const PuzzleMode: React.FC<PuzzleModeProps> = ({
             >
               <h3>정답</h3>
               <div className="solution-moves">
-                {currentPuzzle.solution.map((move, index) => (
+                {currentPuzzle.solution.slice(1).map((move, index) => (
                   <span 
                     key={index}
-                    className={index === currentSolutionIndex ? 'current-move' : ''}
+                    className={index + 1 === currentSolutionIndex ? 'current-move' : ''}
                   >
                     {index + 1}. {move}
                   </span>

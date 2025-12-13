@@ -10,6 +10,7 @@ interface ChessBoardProps {
   showCoordinates?: boolean;
   animationDuration?: number;
   arePiecesDraggable?: boolean;
+  customSquareStyles?: { [square: string]: React.CSSProperties };
 }
 
 export const ChessBoard: React.FC<ChessBoardProps> = ({
@@ -19,7 +20,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   customBoardStyle = {},
   showCoordinates = true,
   animationDuration = 300,
-  arePiecesDraggable = true
+  arePiecesDraggable = true,
+  customSquareStyles = {}
 }) => {
   return (
     <div className="chess-board-container">
@@ -37,6 +39,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
         arePiecesDraggable={arePiecesDraggable}
         customDarkSquareStyle={{ backgroundColor: '#779952' }}
         customLightSquareStyle={{ backgroundColor: '#edeed1' }}
+        customSquareStyles={customSquareStyles}
       />
     </div>
   );
